@@ -1,0 +1,902 @@
+@file:Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+
+package dev.brahmkshatriya.echo.ui.player
+
+import android.app.UiModeManager
+import android.content.Context
+import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.content.res.Configuration
+import android.graphics.Color
+import android.view.KeyEvent
+import android.graphics.Outline
+import android.graphics.drawable.Animatable
+import android.graphics.drawable.AnimatedVectorDrawable
+import android.graphics.drawable.Drawable
+import android.os.Bundle
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.method.LinkMovementMethod
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.view.ViewOutlineProvider
+import android.widget.ProgressBar
+import androidx.activity.OnBackPressedCallback
+import androidx.annotation.OptIn
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.withResumed
+import androidx.appcompat.content.res.AppCompatResources
+import androidx.core.content.res.ResourcesCompat
+import androidx.core.graphics.drawable.toBitmap
+import androidx.core.net.toUri
+import androidx.core.view.doOnLayout
+import androidx.core.view.doOnNextLayout
+import androidx.core.view.isVisible
+import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.RecyclerView
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.Player.REPEAT_MODE_ALL
+import androidx.media3.common.Player.REPEAT_MODE_OFF
+import androidx.media3.common.Player.REPEAT_MODE_ONE
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.SimpleCache
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+import androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+import androidx.media3.ui.CaptionStyleCompat
+import androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE
+import com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED
+import com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
+import com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_HIDDEN
+import com.google.android.material.slider.Slider
+import dev.brahmkshatriya.echo.R
+import dev.brahmkshatriya.echo.common.models.Artist
+import dev.brahmkshatriya.echo.common.models.EchoMediaItem
+import dev.brahmkshatriya.echo.common.models.Streamable
+import dev.brahmkshatriya.echo.databinding.FragmentPlayerBinding
+import dev.brahmkshatriya.echo.playback.MediaItemUtils.background
+import dev.brahmkshatriya.echo.playback.MediaItemUtils.context
+import dev.brahmkshatriya.echo.playback.MediaItemUtils.extensionId
+import dev.brahmkshatriya.echo.playback.MediaItemUtils.isLiked
+import dev.brahmkshatriya.echo.playback.MediaItemUtils.isLoaded
+import dev.brahmkshatriya.echo.playback.MediaItemUtils.showBackground
+import dev.brahmkshatriya.echo.playback.MediaItemUtils.track
+import dev.brahmkshatriya.echo.playback.MediaItemUtils.unloadedCover
+import dev.brahmkshatriya.echo.ui.common.FragmentUtils.openFragment
+import dev.brahmkshatriya.echo.ui.common.UiViewModel
+import dev.brahmkshatriya.echo.ui.common.UiViewModel.Companion.applyHorizontalInsets
+import dev.brahmkshatriya.echo.ui.common.UiViewModel.Companion.applyInsets
+import dev.brahmkshatriya.echo.ui.common.UiViewModel.Companion.isFinalState
+import dev.brahmkshatriya.echo.ui.common.UiViewModel.Companion.setupPlayerMoreBehavior
+import dev.brahmkshatriya.echo.ui.media.MediaFragment
+import dev.brahmkshatriya.echo.ui.media.more.MediaMoreBottomSheet
+import dev.brahmkshatriya.echo.ui.player.PlayerColors.Companion.defaultPlayerColors
+import dev.brahmkshatriya.echo.ui.player.PlayerColors.Companion.getColorsFrom
+import dev.brahmkshatriya.echo.ui.player.PlayerTrackAdapter.Companion.configureClicking
+import dev.brahmkshatriya.echo.ui.player.quality.FormatUtils.getDetails
+import dev.brahmkshatriya.echo.ui.player.quality.QualitySelectionBottomSheet
+import dev.brahmkshatriya.echo.utils.ContextUtils.emit
+import dev.brahmkshatriya.echo.utils.ContextUtils.getSettings
+import dev.brahmkshatriya.echo.utils.ContextUtils.observe
+import dev.brahmkshatriya.echo.utils.image.ImageUtils.getCachedDrawable
+import dev.brahmkshatriya.echo.utils.image.ImageUtils.loadBlurred
+import dev.brahmkshatriya.echo.utils.image.ImageUtils.loadWithThumb
+import dev.brahmkshatriya.echo.utils.ui.AnimationUtils.animateVisibility
+import dev.brahmkshatriya.echo.utils.ui.AutoClearedValue.Companion.autoClearedNullable
+import dev.brahmkshatriya.echo.utils.ui.CheckBoxListener
+import dev.brahmkshatriya.echo.utils.ui.SimpleItemSpan
+import dev.brahmkshatriya.echo.utils.ui.UiUtils.dpToPx
+import dev.brahmkshatriya.echo.utils.ui.UiUtils.hideSystemUi
+import dev.brahmkshatriya.echo.utils.ui.UiUtils.isLandscape
+import dev.brahmkshatriya.echo.utils.ui.UiUtils.isRTL
+import dev.brahmkshatriya.echo.utils.ui.UiUtils.marquee
+import dev.brahmkshatriya.echo.utils.ui.UiUtils.toTimeString
+import dev.brahmkshatriya.echo.utils.ui.ViewPager2Utils.registerOnUserPageChangeCallback
+import dev.brahmkshatriya.echo.utils.ui.ViewPager2Utils.supportBottomSheetBehavior
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
+import org.koin.androidx.viewmodel.ext.android.activityViewModel
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+
+class PlayerFragment : Fragment() {
+    private var binding by autoClearedNullable<FragmentPlayerBinding>()
+    private val viewModel by activityViewModel<PlayerViewModel>()
+    private val uiViewModel by activityViewModel<UiViewModel>()
+    private val adapter by lazy {
+        PlayerTrackAdapter(uiViewModel, viewModel.playerState.current, adapterListener)
+    }
+
+    override fun onCreateView(
+        inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?,
+    ): View {
+        binding = FragmentPlayerBinding.inflate(inflater, container, false)
+        return binding!!.root
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        val binding = binding!!
+        binding.viewPager.supportBottomSheetBehavior()
+        setupPlayerMoreBehavior(uiViewModel, binding.playerMoreContainer)
+        configureOutline(binding.root)
+        configureCollapsing(binding)
+        configureColors()
+        configurePlayerControls()
+        configureBackgroundPlayerView()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        binding?.bgImage?.pause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (uiViewModel.playerSheetState.value == STATE_EXPANDED)
+            binding?.bgImage?.resume()
+    }
+
+    private val collapseHeight by lazy {
+        resources.getDimension(R.dimen.collapsed_cover_size).toInt()
+    }
+
+    private fun configureOutline(view: View) {
+        val padding = 8.dpToPx(requireContext())
+        var currHeight = collapseHeight
+        var currRound = padding.toFloat()
+        var currRight = 0
+        var currLeft = 0
+        view.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setRoundRect(
+                    currLeft, 0, currRight, currHeight, currRound
+                )
+            }
+        }
+        view.clipToOutline = true
+
+        var leftPadding = 0
+        var rightPadding = 0
+
+        val maxElevation = 4.dpToPx(requireContext()).toFloat()
+        fun updateOutline() {
+            val offset = max(0f, uiViewModel.playerSheetOffset.value)
+            val inv = 1 - offset
+            view.elevation = maxElevation * inv
+            currHeight = collapseHeight + ((view.height - collapseHeight) * offset).toInt()
+            // Full-width collapsed mini-bar minus the 8dp card inset, but still respecting the
+            // start/end insets — flush to the screen edge in portrait, and flush to the nav-rail's
+            // right edge in landscape (combined.start carries the rail width). Corner radius
+            // (currRound) is intentionally left untouched.
+            currLeft = (leftPadding * inv).toInt()
+            currRight = view.width - (rightPadding * inv).toInt()
+            currRound = max(padding * inv, padding * uiViewModel.playerBackProgress.value * 2)
+            view.invalidateOutline()
+        }
+        observe(uiViewModel.combined) {
+            leftPadding = if (view.context.isRTL()) it.end else it.start
+            rightPadding = if (view.context.isRTL()) it.start else it.end
+            updateOutline()
+        }
+        observe(uiViewModel.playerBackProgress) { updateOutline() }
+        observe(uiViewModel.playerSheetOffset) { updateOutline() }
+        view.doOnLayout { updateOutline() }
+    }
+
+    private fun configureCollapsing(binding: FragmentPlayerBinding) {
+        binding.playerCollapsedContainer.root.clipToOutline = true
+
+        val collapsedTopPadding = 8.dpToPx(requireContext())
+        var currRound = collapsedTopPadding.toFloat()
+        var currTop = 0
+        var currBottom = collapseHeight
+        var currRight = 0
+        var currLeft = 0
+
+        val view = binding.viewPager
+        view.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setRoundRect(
+                    currLeft, currTop, currRight, currBottom, currRound
+                )
+            }
+        }
+        view.clipToOutline = true
+
+        val extraEndPadding = 108.dpToPx(requireContext())
+        var leftPadding = 0
+        var rightPadding = 0
+        val isLandscape = requireContext().isLandscape()
+        fun updateCollapsed() {
+            val (collapsedY, offset, collapsedOffset) = uiViewModel.run {
+                if (playerSheetState.value == STATE_EXPANDED) {
+                    val offset = moreSheetOffset.value
+                    Triple(systemInsets.value.top, offset, if (isLandscape) 0f else offset)
+                } else {
+                    val offset = 1 - max(0f, playerSheetOffset.value)
+                    Triple(-collapsedTopPadding, offset, offset)
+                }
+            }
+            val collapsedInv = 1 - collapsedOffset
+            binding.playerCollapsedContainer.root.run {
+                translationY = collapsedY - collapseHeight * collapsedInv * 2
+                alpha = collapsedOffset * 2
+                translationZ = -1f * collapsedInv
+            }
+            binding.bgCollapsed.run {
+                translationY = collapsedY - collapseHeight * collapsedInv * 2
+                alpha = min(1f, collapsedOffset * 2) - 0.5f
+            }
+            val alphaInv = 1 - min(1f, offset * 3)
+            binding.expandedToolbar.run {
+                translationY = collapseHeight * offset * 2
+                alpha = alphaInv
+                isVisible = offset < 1
+                translationZ = -1f * offset
+            }
+            binding.playerControls.root.run {
+                translationY = collapseHeight * offset * 2
+                alpha = alphaInv
+                isVisible = offset < 1
+            }
+            currTop = uiViewModel.run {
+                val top = if (playerSheetState.value != STATE_EXPANDED) 0
+                else collapsedTopPadding + systemInsets.value.top
+                (top * max(0f, (collapsedOffset - 0.75f) * 4)).toInt()
+            }
+            val bot = currTop + collapseHeight
+            currBottom = bot + ((view.height - bot) * collapsedInv).toInt()
+            currLeft = (leftPadding * collapsedOffset).toInt()
+            currRight = view.width - (rightPadding * collapsedOffset).toInt()
+            currRound = collapsedTopPadding * collapsedOffset
+            view.invalidateOutline()
+        }
+
+        view.doOnLayout { updateCollapsed() }
+        observe(uiViewModel.combined) {
+            val system = uiViewModel.systemInsets.value
+            binding.constraintLayout.applyInsets(system, 64, 0)
+            binding.expandedToolbar.applyInsets(system)
+            val insets = uiViewModel.run {
+                if (playerSheetState.value == STATE_EXPANDED) system
+                else getCombined()
+            }
+            // Collapsed mini-player always uses getCombined() (rail included), NOT the STATE_EXPANDED-
+            // gated `insets`: on rotate-while-expanded → collapse, `combined` last emits while EXPANDED
+            // (gate picks rail-less `system`) and collapsing never re-emits it, so the bar kept a zero
+            // rail inset and overlapped the rail. The container is alpha=0 whenever landscape+expanded
+            // (updateCollapsed line ~222), so carrying the rail inset while expanded is inert. The gate
+            // stays for playerControls below (line 273), which needs `system` for its expanded end-inset.
+            binding.playerCollapsedContainer.root.applyHorizontalInsets(uiViewModel.getCombined())
+            binding.playerControls.root.applyHorizontalInsets(
+                insets,
+                requireActivity().isLandscape()
+            )
+            val left = if (requireContext().isRTL()) system.end + extraEndPadding else system.start
+            leftPadding = collapsedTopPadding + left
+            val right = if (requireContext().isRTL()) system.start else system.end + extraEndPadding
+            rightPadding = collapsedTopPadding + right
+            // Landscape/rail: after rotation the viewPager cover isn't settled to its landscape
+            // geometry when this fires, so a synchronous updateCollapsed() would read stale
+            // cover.left/height and land the morph wrong (art/title overlap). Defer to the next
+            // layout so it reads settled geometry. (Gate is isLandscape — NOT it.bottom, because
+            // here `it` is uiViewModel.combined, whose bottom carries playerInsets and is never 0
+            // in landscape.) Portrait keeps the synchronous path unchanged.
+            if (isLandscape) {
+                binding.viewPager.doOnNextLayout { updateCollapsed(); adapter.insetsUpdated() }
+            } else {
+                updateCollapsed()
+                adapter.insetsUpdated()
+            }
+        }
+
+        observe(uiViewModel.moreSheetOffset) {
+            updateCollapsed()
+            adapter.moreOffsetUpdated()
+        }
+        observe(uiViewModel.playerSheetOffset) {
+            updateCollapsed()
+            adapter.playerOffsetUpdated()
+
+            viewModel.browser.value?.volume = 1 + min(0f, it)
+            if (it < 1)
+                requireActivity().hideSystemUi(false)
+            else if (uiViewModel.playerBgVisible.value)
+                requireActivity().hideSystemUi(true)
+        }
+
+        observe(uiViewModel.playerSheetState) {
+            updateCollapsed()
+            if (isFinalState(it)) adapter.playerSheetStateUpdated()
+            if (it == STATE_COLLAPSED) emit(uiViewModel.playerBgVisible, false)
+            when (it) {
+                STATE_EXPANDED -> binding.bgImage.resume()
+                else -> binding.bgImage.pause()
+            }
+            // Canvas/video is fullscreen-only — re-run applyPlayer() for the new sheet state: on collapse it
+            // DETACHES the video surface (playerView.player = null) so the Canvas/video stops rendering in the
+            // mini-bar (surface-only — audio keeps playing via the service player); on expand it re-attaches
+            // and shows it. Same transition as the KenBurns pause above. playerSheetState only emits final
+            // states (HIDDEN/COLLAPSED/EXPANDED), so this fires once per settle — no mid-drag churn.
+            applyPlayer()
+        }
+        binding.playerControls.root.doOnLayout {
+            uiViewModel.playerControlsHeight.value = it.height
+            adapter.playerControlsHeightUpdated()
+        }
+        var bgBackCallback: OnBackPressedCallback? = null
+        observe(uiViewModel.playerBgVisible) { visible ->
+            binding.viewPager.isUserInputEnabled = !visible
+            binding.fgContainer.animateVisibility(!visible)
+            binding.playerMoreContainer.animateVisibility(!visible)
+            bgBackCallback?.remove()
+            bgBackCallback = null
+            if (visible) {
+                bgBackCallback = object : OnBackPressedCallback(true) {
+                    override fun handleOnBackPressed() {
+                        uiViewModel.changeBgVisible(false)
+                    }
+                }.also {
+                    requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, it)
+                }
+            }
+        }
+        binding.bgPanel.configureClicking(adapterListener, uiViewModel)
+        binding.expandedToolbar.setNavigationOnClickListener {
+            uiViewModel.collapsePlayer()
+        }
+    }
+
+    private val adapterListener = object : PlayerTrackAdapter.Listener {
+        override fun onClick(): Unit = uiViewModel.run {
+            if (playerSheetState.value != STATE_EXPANDED) changePlayerState(STATE_EXPANDED)
+            else {
+                if (moreSheetState.value == STATE_EXPANDED) {
+                    changeMoreState(STATE_COLLAPSED)
+                    return
+                }
+                val shouldBeVisible = !playerBgVisible.value
+                if (shouldBeVisible) {
+                    val binding = binding ?: return@run
+                    if (binding.bgImage.drawable == null && !binding.playerView.player.hasVideo())
+                        return
+                    changeMoreState(STATE_COLLAPSED)
+                }
+                changeBgVisible(shouldBeVisible)
+            }
+        }
+
+        override fun onStartDoubleClick() {
+            viewModel.seekToAdd(-10000)
+        }
+
+        override fun onEndDoubleClick() {
+            viewModel.seekToAdd(10000)
+        }
+    }
+
+    private var isInitialLoad = true
+    private var pendingPageScroll: Runnable? = null
+    private fun configurePlayerControls() {
+        val viewPager = binding!!.viewPager
+        viewPager.adapter = adapter
+        (viewPager.getChildAt(0) as? RecyclerView)?.itemAnimator = null
+        viewPager.registerOnUserPageChangeCallback { pos, isUser ->
+            val curr = viewModel.playerState.current.value
+            val index = curr?.let { c -> viewModel.queue.indexOfFirst { it.mediaId == c.mediaItem.mediaId } } ?: -1
+            if (index != pos && isUser) viewModel.seek(pos)
+        }
+
+        fun submit() {
+            val capturedCurrent = viewModel.playerState.current.value
+            val capturedIndex = capturedCurrent?.let { c ->
+                viewModel.queue.indexOfFirst { it.mediaId == c.mediaItem.mediaId }.takeIf { it != -1 }
+            }
+            adapter.submitList(viewModel.queue) {
+                val index = capturedIndex ?: return@submitList
+                val viewPager = binding?.viewPager ?: return@submitList
+                val current = viewPager.currentItem
+                // Only smooth-scroll when the view is actually on-screen (STARTED). A smooth scroll is driven by
+                // Choreographer frames, which are paused while the screen is off — so a screen-off auto-advance's
+                // smoothScrollToPosition stalls and desyncs ViewPager2's logical mCurrentItem from the rendered
+                // page (the one-behind bug). A NON-smooth setCurrentItem commits via the LayoutManager's pending
+                // scroll (scrollToPosition when laid out, mPendingCurrentItem when not), applied on the next
+                // layout pass at screen-on — no frames needed — so the correct page renders with no stale frame.
+                // On-screen advances keep the animated ±1 behavior.
+                val started = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+                val smooth = started && !isInitialLoad && abs(index - current) <= 1
+                isInitialLoad = false
+                if (!viewPager.isLaidOut) viewPager.setCurrentItem(index, smooth)
+                else {
+                    pendingPageScroll?.let { viewPager.removeCallbacks(it) }
+                    val runnable = Runnable {
+                        val liveCurrent = viewModel.playerState.current.value
+                        val liveIndex = liveCurrent?.let { c ->
+                            viewModel.queue.indexOfFirst { it.mediaId == c.mediaItem.mediaId }.takeIf { it != -1 }
+                        } ?: index
+                        binding?.viewPager?.setCurrentItem(liveIndex, smooth)
+                    }
+                    pendingPageScroll = runnable
+                    viewPager.post(runnable)
+                }
+            }
+        }
+
+        val binding = binding!!
+        binding.playerControls.trackHeart.addOnCheckedStateChangedListener(likeListener)
+        // Deliberately not using observe()/flowWithLifecycle here: that restarts collection
+        // (and redelivers the StateFlow's current value) on every STARTED re-entry, which can
+        // fire multiple times in quick succession during Activity recreation. This must collect
+        // exactly once per Fragment instance since it drives non-idempotent side effects
+        // (image load/dispose, page scroll).
+        // PHONE-ONLY sheet-state driver. This is the SOLE sheet show/hide logic on phone (BottomSheet +
+        // PlayerFragment). MainActivity's current-observer does NOT participate here — it is TV-only, gated by
+        // R.id.tvMiniPlayer (see MainActivity.setupTvMiniPlayer). TV uses PlayerTvFragment + tvMiniPlayer;
+        // Android Auto has no Fragment at all. So changes in this block affect phone only.
+        lifecycleScope.launch {
+            viewModel.playerState.current.collectLatest {
+                uiViewModel.run {
+                    // Persistent transport bar (Spotify / YouTube Music / Apple Music model): the mini bar is
+                    // shown whenever there is a current track and hidden ONLY when the queue empties. There is
+                    // no dismiss gesture — the sheet is non-hideable while shown (applyPlayerBehaviorState).
+                    // This is a pure current-STATE rule, not an edge: the first non-null emission shows
+                    // COLLAPSED, so a cold-start restore (current is set before this Fragment subscribes) needs
+                    // no prior null and no dependence on when the sheet settles. playerSheetState is read only
+                    // to preserve a user's EXPANDED and to avoid churn when the bar is already shown.
+                    if (it == null) changePlayerState(STATE_HIDDEN)
+                    else if (playerSheetState.value == STATE_HIDDEN) changePlayerState(STATE_COLLAPSED)
+                }
+                submit()
+                it?.mediaItem ?: return@collectLatest
+                binding.applyCurrent(it.mediaItem)
+                loadCurrentBackground(it.mediaItem)
+            }
+        }
+
+        observe(viewModel.queueFlow) { submit() }
+        observe(viewModel.browser) { controller ->
+            if (controller != null && viewModel.queue.isNotEmpty() && adapter.currentList.isEmpty()) {
+                submit()
+            }
+        }
+
+        val playPauseListener = CheckBoxListener { viewModel.setPlaying(it) }
+        binding.playerControls.trackPlayPause
+            .addOnCheckedStateChangedListener(playPauseListener)
+        binding.playerCollapsedContainer.collapsedTrackPlayPause
+            .addOnCheckedStateChangedListener(playPauseListener)
+        observe(viewModel.playWhenReady) {
+            binding.run {
+                playPauseListener.enabled = false
+                playerControls.trackPlayPause.isChecked = it
+                playerCollapsedContainer.collapsedTrackPlayPause.isChecked = it
+                playPauseListener.enabled = true
+
+                val isBuffering = viewModel.buffering.value && it
+                playerControls.playingIndicator.alpha = if (isBuffering) 1f else 0f
+                playerCollapsedContainer.collapsedPlayingIndicator.alpha = if (isBuffering) 1f else 0f
+            }
+        }
+        observe(viewModel.buffering) {
+            val playWhenReady = viewModel.playWhenReady.value
+            val isBuffering = it && playWhenReady
+            binding.playerControls.playingIndicator.alpha = if (isBuffering) 1f else 0f
+            binding.playerCollapsedContainer.collapsedPlayingIndicator.alpha = if (isBuffering) 1f else 0f
+        }
+
+        observe(viewModel.progress) { (curr, buff) ->
+            binding.playerCollapsedContainer.run {
+                collapsedBuffer.progress = buff.toInt()
+                collapsedSeekbar.progress = curr.toInt()
+            }
+            binding.playerControls.run {
+                if (!seekBar.isPressed) {
+                    bufferBar.progress = buff.toInt()
+                    seekBar.value = max(0f, min(curr.toFloat(), seekBar.valueTo))
+                    trackCurrentTime.text = curr.toTimeString()
+                }
+            }
+        }
+
+        // Duration comes from a COMBINE of totalDuration + current, not totalDuration alone. On cold start
+        // player.duration is TIME_UNSET (unprepared) so totalDuration stays null, and its null->null is
+        // conflated to no emission — but the restored track carries a known duration. combine re-fires when
+        // current arrives, so the `?: current.track.duration` fallback actually evaluates instead of being
+        // stranded behind a totalDuration emission that never comes. Precedence stays totalDuration-first.
+        // DELIBERATE MIRROR of PlayerTvFragment's duration observer — keep the two in sync; each writes its
+        // own views (phone: playerControls + collapsed bar; TV: tvSeekBar/tvTotalTime/tvBufferBar).
+        observe(combine(viewModel.totalDuration, viewModel.playerState.current) { total, current ->
+            total ?: current?.track?.duration ?: 0L
+        }) { duration ->
+            binding.playerCollapsedContainer.run {
+                collapsedSeekbar.max = duration.toInt()
+                collapsedBuffer.max = duration.toInt()
+            }
+            binding.playerControls.run {
+                bufferBar.max = duration.toInt()
+                seekBar.apply {
+                    value = max(0f, min(value, duration.toFloat()))
+                    valueTo = 1f + duration
+                }
+                trackTotalTime.text = duration.toTimeString()
+            }
+        }
+
+
+        val repeatModes = listOf(REPEAT_MODE_OFF, REPEAT_MODE_ALL, REPEAT_MODE_ONE)
+        val animatedVectorDrawables = requireContext().run {
+            fun asAnimated(id: Int) =
+                AppCompatResources.getDrawable(this, id) as AnimatedVectorDrawable
+            listOf(
+                asAnimated(R.drawable.ic_repeat_one_to_repeat_off_40dp),
+                asAnimated(R.drawable.ic_repeat_off_to_repeat_40dp),
+                asAnimated(R.drawable.ic_repeat_to_repeat_one_40dp)
+            )
+        }
+        val drawables = requireContext().run {
+            fun asDrawable(id: Int) = AppCompatResources.getDrawable(this, id)!!
+            listOf(
+                asDrawable(R.drawable.ic_repeat_off_40dp),
+                asDrawable(R.drawable.ic_repeat_40dp),
+                asDrawable(R.drawable.ic_repeat_one_40dp),
+            )
+        }
+
+        binding.playerControls.trackRepeat.icon =
+            drawables[repeatModes.indexOf(viewModel.repeatMode.value)]
+
+        fun changeRepeatDrawable(repeatMode: Int) = binding.playerControls.trackRepeat.run {
+            val index = repeatModes.indexOf(repeatMode)
+            icon = animatedVectorDrawables[index]
+            (icon as Animatable).start()
+        }
+
+        binding.playerControls.run {
+            seekBar.apply {
+                addOnChangeListener { _, value, fromUser ->
+                    if (fromUser) trackCurrentTime.text = value.toLong().toTimeString()
+                }
+                addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
+                    override fun onStartTrackingTouch(slider: Slider) = Unit
+                    override fun onStopTrackingTouch(slider: Slider) =
+                        viewModel.seekTo(slider.value.toLong())
+                })
+                val uiModeManager =
+                    requireContext().getSystemService(Context.UI_MODE_SERVICE) as UiModeManager
+                val isTV = requireContext().packageManager
+                    .hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+                    uiModeManager.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+                if (isTV) {
+                    setOnKeyListener { _, keyCode, event ->
+                        if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+                        when (keyCode) {
+                            KeyEvent.KEYCODE_DPAD_LEFT -> { viewModel.seekToAdd(-10_000); true }
+                            KeyEvent.KEYCODE_DPAD_RIGHT -> { viewModel.seekToAdd(10_000); true }
+                            else -> false
+                        }
+                    }
+                }
+            }
+
+            trackNext.setOnClickListener {
+                viewModel.next()
+                (trackNext.icon as Animatable).start()
+            }
+            observe(viewModel.nextEnabled) { trackNext.isEnabled = it }
+
+            trackPrevious.setOnClickListener {
+                viewModel.previous()
+                (trackPrevious.icon as Animatable).start()
+            }
+            observe(viewModel.previousEnabled) { trackPrevious.isEnabled = it }
+
+            val shuffleListener = CheckBoxListener { viewModel.setShuffle(it) }
+            trackShuffle.addOnCheckedStateChangedListener(shuffleListener)
+            observe(viewModel.shuffleMode) {
+                shuffleListener.enabled = false
+                trackShuffle.isChecked = it
+                shuffleListener.enabled = true
+            }
+
+            trackRepeat.setOnClickListener {
+                val mode = when (viewModel.repeatMode.value) {
+                    REPEAT_MODE_OFF -> REPEAT_MODE_ALL
+                    REPEAT_MODE_ALL -> REPEAT_MODE_ONE
+                    else -> REPEAT_MODE_OFF
+                }
+                changeRepeatDrawable(mode)
+                viewModel.setRepeat(mode)
+            }
+            observe(viewModel.repeatMode) { changeRepeatDrawable(it) }
+
+            trackSubtitle.setOnClickListener {
+                QualitySelectionBottomSheet().show(parentFragmentManager, null)
+            }
+            observe(viewModel.serverAndTracks) { (tracks, server, index) ->
+                trackSubtitle.text = tracks?.getDetails(requireContext(), server, index)
+                    ?.joinToString(" ⦿ ")?.takeIf { it.isNotBlank() }
+            }
+        }
+    }
+
+    private val likeListener = CheckBoxListener { viewModel.likeCurrent(it) }
+
+    // Ken Burns background is driven by CURRENT TRACK IDENTITY (loadCurrentBackground), like the mini bar —
+    // NOT by the attached page's coverDrawable, which is null/detached after a screen-off auto-advance and
+    // left it stale + downstream of the pager. Guarded by lastBlurredItemId so re-applying on every resume is
+    // a no-op when the track is unchanged.
+    private var lastBlurredItemId: String? = null
+    private fun loadCurrentBackground(item: MediaItem?) {
+        val bg = binding?.bgImage ?: return
+        val context = context ?: return
+        if (!context.showBackground()) {
+            bg.setImageDrawable(null)
+            lastBlurredItemId = null
+            return
+        }
+        val itemId = item?.mediaId
+        if (itemId == lastBlurredItemId) return
+        lastBlurredItemId = itemId
+        bg.loadBlurred(item?.track?.cover, 8f)
+    }
+
+    private fun configureColors() {
+        observe(viewModel.playerState.current) { adapter.onCurrentUpdated() }
+        var last: Drawable? = null
+        // Colors/dynamic-theming still derive from the attached page drawable; only the Ken Burns background
+        // was moved to identity-based loading (loadCurrentBackground).
+        adapter.currentDrawableListener = { drawable ->
+            if (last != drawable) {
+                last = drawable
+                val context = requireContext()
+                uiViewModel.playerDrawable.value = drawable
+                val colors =
+                    if (context.isDynamic()) context.getColorsFrom(drawable?.toBitmap()) else null
+                uiViewModel.playerColors.value = colors
+            }
+        }
+        val bufferView =
+            binding?.playerView?.findViewById<ProgressBar>(androidx.media3.ui.R.id.exo_buffering)
+        observe(uiViewModel.playerColors) {
+            val context = requireContext()
+            if (context.isPlayerColor() && context.isDynamic()) {
+                val newAccent = it?.accent
+                if (uiViewModel.lastPlayerAccentColor != newAccent) {
+                    uiViewModel.lastPlayerAccentColor = newAccent
+                    if (requireActivity().lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                        requireActivity().recreate()
+                    } else {
+                        lifecycleScope.launch {
+                            lifecycle.withResumed { requireActivity().recreate() }
+                        }
+                    }
+                    return@observe
+                }
+            }
+            val colors = it ?: context.defaultPlayerColors()
+            val binding = binding!!
+            adapter.onColorsUpdated()
+
+            binding.run {
+                val color = if (requireContext().isDynamic()) colors.accent
+                else colors.background
+                root.setBackgroundColor(color)
+                val backgroundState = ColorStateList.valueOf(colors.background)
+                bgGradient.imageTintList = backgroundState
+                bgCollapsed.backgroundTintList = backgroundState
+                bufferView?.indeterminateDrawable?.setTint(colors.accent)
+                expandedToolbar.run {
+                    setTitleTextColor(colors.onBackground)
+                    setSubtitleTextColor(colors.onBackground)
+                }
+            }
+
+            binding.playerCollapsedContainer.run {
+                collapsedPlayingIndicator.setIndicatorColor(colors.accent)
+                collapsedSeekbar.setIndicatorColor(colors.accent)
+                collapsedBuffer.setIndicatorColor(colors.accent)
+                collapsedBuffer.trackColor = colors.onBackground
+                collapsedTrackTitle.setTextColor(colors.onBackground)
+                collapsedTrackArtist.setTextColor(colors.onBackground)
+            }
+
+            binding.playerControls.run {
+                seekBar.trackActiveTintList = ColorStateList.valueOf(colors.accent)
+                seekBar.thumbTintList = ColorStateList.valueOf(colors.accent)
+                playingIndicator.setIndicatorColor(colors.accent)
+                bufferBar.setIndicatorColor(colors.accent)
+                bufferBar.trackColor = colors.onBackground
+                trackCurrentTime.setTextColor(colors.onBackground)
+                trackTotalTime.setTextColor(colors.onBackground)
+                trackTitle.setTextColor(colors.onBackground)
+                trackArtist.setTextColor(colors.onBackground)
+            }
+        }
+    }
+
+    private fun FragmentPlayerBinding.applyCurrent(item: MediaItem) {
+        val track = item.track
+        val extId = item.extensionId
+        expandedToolbar.run {
+            val itemContext = item.context
+            title = if (itemContext != null) context.getString(R.string.playing_from) else null
+            subtitle = itemContext?.title
+            val navigableContext = when (itemContext) {
+                is EchoMediaItem.Lists, is Artist -> itemContext
+                else -> null
+            }
+            setOnClickListener(if (navigableContext != null) View.OnClickListener {
+                openItem(extId, navigableContext)
+            } else null)
+            setOnMenuItemClickListener {
+                if (it.itemId != R.id.menu_more) return@setOnMenuItemClickListener false
+                onMoreClicked(item)
+                true
+            }
+        }
+        playerCollapsedContainer.run {
+            collapsedTrackTitle.text = track.title
+            collapsedTrackArtist.text = track.artists.joinToString(", ") { it.name }
+            val thumb = collapsedTrackCover.drawable
+                ?: item.unloadedCover?.getCachedDrawable(requireContext())
+            track.cover.loadWithThumb(collapsedTrackCover, thumb) {
+                val image = it
+                    ?: ResourcesCompat.getDrawable(resources, R.drawable.ic_music, context.theme)
+                setImageDrawable(image)
+            }
+        }
+        playerControls.run {
+            trackTitle.text = track.title
+            trackTitle.marquee()
+            val artists = track.artists
+            val artistNames = artists.joinToString(", ") { it.name }
+            val span = SpannableString(artistNames)
+
+            artists.forEach { artist ->
+                val start = artistNames.indexOf(artist.name)
+                val end = start + artist.name.length
+                val clickableSpan = SimpleItemSpan(trackArtist.context) {
+                    openItem(extId, artist)
+                }
+                runCatching {
+                    span.setSpan(
+                        clickableSpan, start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                }
+            }
+
+            trackArtist.text = span
+            trackArtist.movementMethod = LinkMovementMethod.getInstance()
+            likeListener.enabled = false
+            trackHeart.isChecked = item.isLiked
+            likeListener.enabled = true
+            lifecycleScope.launch {
+                val isTrackClient = viewModel.isLikeClient(item.extensionId)
+                trackHeart.isVisible = isTrackClient
+            }
+        }
+    }
+
+    private fun openItem(extension: String, item: EchoMediaItem) {
+        requireActivity().openFragment<MediaFragment>(
+            null, MediaFragment.getBundle(extension, item, false)
+        )
+    }
+
+    private fun onMoreClicked(item: MediaItem) {
+        MediaMoreBottomSheet.show(
+            this, requireActivity().supportFragmentManager,
+            R.id.navHostFragment, item.extensionId, item.track, item.isLoaded, true
+        )
+    }
+
+    private fun Player?.hasVideo() =
+        this?.currentTracks?.groups.orEmpty().any { it.type == C.TRACK_TYPE_VIDEO }
+
+    private fun applyVideoVisibility(visible: Boolean) {
+        binding?.playerView?.isVisible = visible
+        binding?.bgImage?.isVisible = !visible
+        if (requireContext().isLandscape()) return
+        binding?.playerControls?.trackCoverPlaceHolder?.isVisible = visible
+        adapter.updatePlayerVisibility(visible)
+    }
+
+    private var oldBg: Streamable.Media.Background? = null
+    private var backgroundPlayer: Player? = null
+
+    @OptIn(UnstableApi::class)
+    private fun applyPlayer() {
+        // Canvas/video is fullscreen-only. When NOT expanded (mini-bar / hidden), DETACH the video surface so
+        // the Canvas/video stops rendering in the collapsed bar. `playerView.player = null` clears ONLY the
+        // view's video surface (clearVideoSurface); the actual playback lives in the service player behind
+        // the MediaController (mainPlayer), so AUDIO IS UNAFFECTED — it keeps playing while collapsed. The
+        // static bg_image (blurred art) shows instead. Video/Canvas re-attaches on expand (below), rendering
+        // at the live position. Setting isVisible alone did NOT stop the SurfaceView-backed PlayerView —
+        // detaching the surface is the reliable stop (the true analog of KenBurns' animator pause).
+        if (uiViewModel.playerSheetState.value != STATE_EXPANDED) {
+            binding?.playerView?.player = null
+            backgroundPlayer?.playWhenReady = false   // no-op for the main-player video path (null); pauses
+                                                      // the silent Canvas loop in the background-streamable case
+            binding?.playerView?.isVisible = false
+            binding?.bgImage?.isVisible = true
+            return
+        }
+        val mainPlayer = viewModel.browser.value
+        val background = viewModel.playerState.current.value?.mediaItem?.background
+        val visible = if (mainPlayer.hasVideo()) {
+            binding?.playerView?.player = mainPlayer
+            binding?.playerView?.resizeMode = RESIZE_MODE_FIT
+            backgroundPlayer?.release()
+            backgroundPlayer = null
+            true
+        } else if (background != null) {
+            if (oldBg != background || backgroundPlayer == null) {
+                oldBg = background
+                backgroundPlayer?.release()
+                backgroundPlayer = getPlayer(requireContext(), viewModel.cache, background)
+            }
+            binding?.playerView?.player = backgroundPlayer
+            binding?.playerView?.resizeMode = RESIZE_MODE_ZOOM
+            backgroundPlayer?.playWhenReady = true   // resume a Canvas that was paused on collapse
+            true
+        } else {
+            backgroundPlayer?.release()
+            backgroundPlayer = null
+            binding?.playerView?.player = null
+            false
+        }
+        applyVideoVisibility(visible)
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun configureBackgroundPlayerView() {
+        binding?.playerView?.subtitleView?.setStyle(
+            CaptionStyleCompat(
+                Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT,
+                EDGE_TYPE_OUTLINE, Color.BLACK, null
+            )
+        )
+        observe(viewModel.serverAndTracks) { applyPlayer() }
+    }
+
+    companion object {
+        private fun Context.showBackground() = getSettings().showBackground()
+        const val DYNAMIC_PLAYER = "dynamic_player"
+        const val PLAYER_COLOR = "player_app_color"
+        fun Context.isDynamic(): Boolean =
+            getSettings().getBoolean(DYNAMIC_PLAYER, true)
+
+        private fun Context.isPlayerColor() =
+            getSettings().getBoolean(PLAYER_COLOR, false)
+
+        @OptIn(UnstableApi::class)
+        fun getPlayer(
+            context: Context, cache: SimpleCache, video: Streamable.Media.Background,
+        ): ExoPlayer {
+            val cacheFactory = CacheDataSource
+                .Factory().setCache(cache)
+                .setUpstreamDataSourceFactory(
+                    DefaultHttpDataSource.Factory()
+                        .setDefaultRequestProperties(video.request.headers)
+                )
+            val factory = DefaultMediaSourceFactory(context)
+                .setDataSourceFactory(cacheFactory)
+            val player = ExoPlayer.Builder(context).setMediaSourceFactory(factory).build()
+            player.setMediaItem(MediaItem.fromUri(video.request.url.toUri()))
+            player.repeatMode = REPEAT_MODE_ONE
+            player.volume = 0f
+            player.prepare()
+            player.play()
+            return player
+        }
+    }
+}

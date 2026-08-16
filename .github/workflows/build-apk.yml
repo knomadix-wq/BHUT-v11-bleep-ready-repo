@@ -1,0 +1,36 @@
+name: Build personal APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+      - name: Make Gradle executable
+        run: chmod +x gradlew
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
+      - name: Collect APKs
+        run: |
+          mkdir -p apk-output
+          find . -type f -name "*.apk" -exec cp {} apk-output/ \;
+          ls -lah apk-output
+      - name: Upload APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: BHUT-v9-single-apk
+          path: apk-output/*.apk
+          if-no-files-found: error

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="collapsed_cover_size">64dp</dimen>
+    <!-- Corner radius for feed card art (rounded_rectangle_cover) and history thumbnails (CardView),
+         both via ?itemCorner. Phone default; bumped to 12dp on TV in values-land-television/dimens.xml. -->
+    <dimen name="item_corner">8dp</dimen>
+    <!-- Width reserved at the trailing edge of the collapsed mini-player for the play/pause control
+         (48dp button + 8dp padding each side). Referenced by BOTH item_player_collapsed_controls.xml
+         (the live bar) and item_player_collapsed.xml (the invisible twin measured for the collapse
+         animation): the two title columns must reserve the identical end width, or the title shifts
+         horizontally as the player collapses. Single source of truth so they can't drift. -->
+    <dimen name="collapsed_end_controls_width">64dp</dimen>
+    <dimen name="context_menu_cover_size">48dp</dimen>
+    <dimen name="max_cover_size">384dp</dimen>
+    <dimen name="media_header_cover_size">250dp</dimen>
+    <dimen name="bottom_player_peek_height">136dp</dimen>
+    <dimen name="nav_width">@dimen/collapsed_cover_size</dimen>
+    <dimen name="nav_height">@dimen/collapsed_cover_size</dimen>
+    <dimen name="player_info_peek_height">@dimen/nav_height</dimen>
+    <dimen name="player_more_top_margin">78dp</dimen>
+
+    <!-- Fixed heights for the nested horizontal RecyclerView in HorizontalListViewHolder,
+         per Shelf.Lists subtype, so the row doesn't visually collapse-then-expand while its
+         adapter is still populating. Estimated from each item layout's content; tune visually
+         if a type looks clipped or has excess empty space. -->
+    <dimen name="shelf_media_text_block_height">80dp</dimen>
+    <dimen name="shelf_media_text_block_height_radio">45dp</dimen>
+    <dimen name="shelf_category_row_height">68dp</dimen>
+    <dimen name="shelf_three_tracks_row_height">216dp</dimen>
+
+    <!-- Backing dimens for the ?itemCoverSize theme attr (see themes.xml) and the section-header text size,
+         so both can be TV-overridden in values-land-television/. These phone values equal the previous
+         inline literals, so phone/tablet render identically. -->
+    <dimen name="item_cover_size">96dp</dimen>
+    <dimen name="item_cover_size_big">128dp</dimen>
+    <dimen name="shelf_header_text_size">20sp</dimen>
+</resources>

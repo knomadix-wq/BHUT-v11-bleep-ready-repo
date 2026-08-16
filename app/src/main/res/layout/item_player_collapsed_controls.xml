@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/player_collapsed_container"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginVertical="8dp"
+    android:background="@drawable/shape_miniplayer_bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/collapsed_cover_size"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <com.google.android.material.imageview.ShapeableImageView
+            android:id="@+id/collapsedTrackCover"
+            android:layout_width="@dimen/collapsed_cover_size"
+            android:layout_height="@dimen/collapsed_cover_size"
+            android:scaleType="centerCrop"
+            app:shapeAppearanceOverlay="@style/ShapeAppearance.Collapsed.Cover" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="16dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/collapsedTrackTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="marquee"
+                android:maxLines="1"
+                android:textColor="?attr/colorOnSurface"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/collapsedTrackArtist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="marquee"
+                android:maxLines="1"
+                android:textColor="?attr/colorOnSurface" />
+
+        </LinearLayout>
+
+        <!-- Reserves the trailing play/pause control's width so the weighted title/artist column above
+             doesn't slide under it. Mirrored in item_player_collapsed.xml (the collapse-animation twin);
+             both use @dimen/collapsed_end_controls_width so they stay in sync. -->
+        <View
+            android:layout_width="@dimen/collapsed_end_controls_width"
+            android:layout_height="@dimen/collapsed_cover_size" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="@dimen/collapsed_cover_size"
+        android:layout_gravity="end"
+        android:padding="8dp">
+
+        <FrameLayout
+            android:id="@+id/collapsedPlayPauseContainer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center">
+
+            <com.google.android.material.progressindicator.CircularProgressIndicator
+                android:id="@+id/collapsedPlayingIndicator"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_gravity="center"
+                android:clickable="false"
+                android:indeterminate="true"
+                app:indicatorSize="36dp" />
+
+            <com.google.android.material.checkbox.MaterialCheckBox
+                android:id="@+id/collapsedTrackPlayPause"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/ripple_44dp"
+                android:button="@drawable/anim_play_pause"
+                android:contentDescription="@string/play"
+                app:buttonTint="@color/button_player" />
+
+        </FrameLayout>
+
+    </LinearLayout>
+
+    <com.google.android.material.progressindicator.LinearProgressIndicator
+        android:id="@+id/collapsed_buffer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:alpha="0.5"
+        android:progress="40"
+        app:indicatorColor="?attr/colorTertiary"
+        app:indicatorTrackGapSize="0dp"
+        app:trackColor="?attr/colorOnSurface"
+        app:trackThickness="2dp" />
+
+    <com.google.android.material.progressindicator.LinearProgressIndicator
+        android:id="@+id/collapsed_seekbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:progress="20"
+        app:indicatorColor="?attr/colorTertiary"
+        app:trackColor="@android:color/transparent"
+        app:trackThickness="2dp" />
+</FrameLayout>

@@ -1,0 +1,208 @@
+package dev.brahmkshatriya.echo.utils.image
+
+import android.content.Context
+import android.graphics.drawable.Drawable
+import android.view.View
+import android.widget.ImageView
+import androidx.core.graphics.drawable.toDrawable
+import androidx.core.graphics.toColorInt
+import androidx.lifecycle.findViewTreeLifecycleOwner
+import coil3.Image
+import coil3.asDrawable
+import coil3.imageLoader
+import coil3.network.NetworkHeaders
+import coil3.network.httpHeaders
+import coil3.request.ImageRequest
+import coil3.request.error
+import coil3.request.lifecycle
+import coil3.request.placeholder
+import coil3.request.target
+import coil3.request.transformations
+import coil3.transform.CircleCropTransformation
+import coil3.transform.Transformation
+import dev.brahmkshatriya.echo.common.models.ImageHolder
+import kotlinx.coroutines.Dispatchers
+
+object ImageUtils {
+
+    private fun <T> tryWith(print: Boolean = false, block: () -> T): T? {
+        return try {
+            block()
+        } catch (e: Throwable) {
+            if (print) e.printStackTrace()
+            null
+        }
+    }
+
+    private suspend fun <T> tryWithSuspend(print: Boolean = true, block: suspend () -> T): T? {
+        return try {
+            block()
+        } catch (e: Throwable) {
+            if (print) e.printStackTrace()
+            null
+        }
+    }
+
+    private fun View.enqueue(builder: ImageRequest.Builder) =
+        context.imageLoader.enqueue(builder.build())
+
+    fun ImageHolder?.loadInto(
+        imageView: ImageView, placeholder: Int? = null, errorDrawable: Int? = null
+    ) = tryWith {
+        val request = createRequest(imageView.context, placeholder, errorDrawable)
+        request.target(imageView)
+        imageView.enqueue(request)
+    }
+
+    // Rounds the DECODED bitmap on its ACTUAL edges after scaling the cover DOWN to FIT (see
+    // FitRoundedCornersTransformation) — nothing is cropped, and the rounding lands on the cover itself
+    // rather than the view rect. (A ShapeableImageView shape only rounds the view rect, so a
+    // fitCenter/letterboxed cover would keep square corners with the shape rounding empty letterbox space;
+    // and Coil's own RoundedCornersTransformation fills-and-crops. This does neither.) Used by the TV
+    // full-screen cover (radius matches @style/TvCoverShape).
+    fun ImageHolder?.loadRoundedInto(
+        imageView: ImageView, cornerRadiusDp: Float, placeholder: Int? = null
+    ) = tryWith {
+        val radiusPx = cornerRadiusDp * imageView.resources.displayMetrics.density
+        val request = createRequest(
+            imageView.context, placeholder, null, FitRoundedCornersTransformation(radiusPx)
+        )
+        request.target(imageView)
+        imageView.enqueue(request)
+    }
+
+    fun ImageHolder.getCachedDrawable(context: Context): Drawable? {
+        val key = diskId ?: return null
+        return context.imageLoader.diskCache?.openSnapshot(key)?.use {
+            Drawable.createFromPath(it.data.toFile().absolutePath)
+        }
+    }
+
+    fun <T : View> ImageHolder?.loadWithThumb(
+        view: T, thumbnail: Drawable? = null,
+        error: Int? = null, onDrawable: T.(Drawable?) -> Unit
+    ) = tryWith(true) {
+        tryWith(false) { onDrawable(view, thumbnail) }
+        val request = createRequest(view.context, null, error)
+        fun setDrawable(image: Image?) {
+            val drawable = image?.asDrawable(view.resources)
+            tryWith(false) { onDrawable(view, drawable) }
+        }
+        request.target({}, ::setDrawable, ::setDrawable)
+        view.enqueue(request)
+    }
+
+    private val circleCrop = CircleCropTransformation()
+    private val squareCrop = SquareCropTransformation()
+    fun <T : View> ImageHolder?.loadAsCircle(
+        view: T,
+        placeholder: Int? = null,
+        error: Int? = null,
+        onDrawable: (Drawable?) -> Unit
+    ) = tryWith {
+        val request = createRequest(view.context, placeholder, error, circleCrop)
+        fun setDrawable(image: Image?) {
+            val drawable = image?.asDrawable(view.resources)
+            tryWith(false) { onDrawable(drawable) }
+        }
+        request.target(::setDrawable, ::setDrawable, ::setDrawable)
+        view.enqueue(request)
+    }
+
+    suspend fun ImageHolder?.loadDrawable(
+        context: Context
+    ) = tryWithSuspend {
+        // Headless (no view target): run Coil's interceptor chain off Main. execute() otherwise
+        // coordinates on Dispatchers.Main.immediate by default (RealImageLoader wraps in async(main) +
+        // withContext(EmptyCoroutineContext)), so decode/transform/cache land on Main. View-target loads
+        // (loadInto/enqueue) are untouched and keep their Main callbacks.
+        val request = createRequest(context, null, null)
+            .interceptorCoroutineContext(Dispatchers.IO)
+        context.imageLoader.execute(request.build()).image?.asDrawable(context.resources)
+    }
+
+    suspend fun ImageHolder?.loadAsCircleDrawable(
+        context: Context
+    ) = tryWithSuspend {
+        // Headless: keep Coil's chain off Main (see loadDrawable). This is the AppShortcuts path.
+        val request = createRequest(context, null, null, circleCrop)
+            .interceptorCoroutineContext(Dispatchers.IO)
+        context.imageLoader.execute(request.build()).image?.asDrawable(context.resources)
+    }
+
+    fun ImageView.loadBlurred(drawable: Drawable?, radius: Float, onLoaded: (() -> Unit)? = null) = tryWith {
+        if (drawable == null) { setImageDrawable(null); return@tryWith }
+        val builder = ImageRequest.Builder(context)
+            .data(drawable)
+            .transformations(BlurTransformation(context, radius))
+            .lifecycle(findViewTreeLifecycleOwner())
+            .target({}, {}) { image ->
+                setImageDrawable(image.asDrawable(resources))
+                onLoaded?.invoke()
+            }
+        enqueue(builder)
+    }
+
+    // Blur a cover by IDENTITY (ImageHolder) straight into the view — the background equivalent of the mini
+    // bar's identity load. Unlike loadBlurred(Drawable), this doesn't need a pre-resolved page drawable, so
+    // the Ken Burns background is no longer coupled to an attached ViewPager holder (which is null/detached
+    // after a screen-off auto-advance). No crop transform, matching the existing full-bleed blurred look.
+    fun ImageView.loadBlurred(cover: ImageHolder?, radius: Float) = tryWith {
+        if (cover == null) { setImageDrawable(null); return@tryWith }
+        val builder = ImageRequest.Builder(context)
+        createRequest(cover, builder)
+        builder.transformations(BlurTransformation(context, radius))
+            .lifecycle(findViewTreeLifecycleOwner())
+            .target({}, {}) { image -> setImageDrawable(image.asDrawable(resources)) }
+        enqueue(builder)
+    }
+
+    private val ImageHolder.diskId
+        get() = when (this) {
+            is ImageHolder.NetworkRequestImageHolder -> request.toString().hashCode().toString()
+            else -> null
+        }
+
+    private fun createRequest(
+        imageHolder: ImageHolder,
+        builder: ImageRequest.Builder,
+    ) = imageHolder.run {
+        builder.diskCacheKey(diskId)
+        when (this) {
+            is ImageHolder.ResourceUriImageHolder -> builder.data(uri)
+            is ImageHolder.NetworkRequestImageHolder -> {
+                val headerBuilder = NetworkHeaders.Builder()
+                request.headers.forEach { (key, value) ->
+                    headerBuilder[key] = value
+                }
+                builder.httpHeaders(headerBuilder.build())
+                builder.data(request.url)
+            }
+
+            is ImageHolder.ResourceIdImageHolder -> builder.data(resId)
+            is ImageHolder.HexColorImageHolder -> builder.data(hex.toColorInt().toDrawable())
+        }
+    }
+
+    private fun ImageHolder?.createRequest(
+        context: Context,
+        placeholder: Int?,
+        errorDrawable: Int?,
+        vararg transformations: Transformation
+    ): ImageRequest.Builder {
+        val builder = ImageRequest.Builder(context)
+        var error = errorDrawable
+        if (error == null) error = placeholder
+
+        if (this == null) {
+            if (error != null) builder.data(error)
+            return builder
+        }
+        createRequest(this, builder)
+        placeholder?.let { builder.placeholder(it) }
+        error?.let { builder.error(it) }
+        val list = if (crop) listOf(squareCrop, *transformations) else transformations.toList()
+        if (list.isNotEmpty()) builder.transformations(list)
+        return builder
+    }
+}

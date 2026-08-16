@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Gladix splash screen icon animation. Total runtime 500ms (matches windowSplashScreenAnimationDuration).
+
+    Phase 1 (0–160ms)  : purple ring fades in + spins 0→360°
+    Phase 2 (130–330ms): magenta bolt draws itself top→bottom via trimPathEnd 0→1
+    Phase 3 (360–500ms): bolt scale pulse + colour brightens to simulate glow
+-->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt">
+    <aapt:attr name="android:drawable">
+        <vector
+            android:name="vector"
+            android:width="24dp"
+            android:height="24dp"
+            android:viewportWidth="24"
+            android:viewportHeight="24">
+
+            <group
+                android:name="ringGroup"
+                android:alpha="0"
+                android:pivotX="12"
+                android:pivotY="12"
+                android:rotation="0">
+                <path
+                    android:fillColor="#00000000"
+                    android:pathData="M 12 2 A 10 10 0 0 1 22 12 A 10 10 0 0 1 12 22 A 10 10 0 0 1 2 12 A 10 10 0 0 1 12 2"
+                    android:strokeColor="#761923"
+                    android:strokeWidth="1.5" />
+            </group>
+
+            <group
+                android:name="boltGroup"
+                android:pivotX="12"
+                android:pivotY="12">
+                <path
+                    android:name="boltPath"
+                    android:fillColor="#761923"
+                    android:pathData="M5,16 C3,11 5,6 10,5 C14,4 18,6 19,9 C20,12 18,14 15,14 C12,15 10,13 11,11 C12,10 13,10 14,11 C13,9 10,9 8,11 C7,13 8,16 11,17 C14,19 18,17 20,14 L22,15 C19,20 12,22 7,19 C6,18 5,17 5,16 Z"
+                    android:trimPathEnd="0" />
+            </group>
+        </vector>
+    </aapt:attr>
+
+    <!-- Phase 1 (0–160ms): ring fades in and spins 0→360° -->
+    <target android:name="ringGroup">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <objectAnimator
+                    android:duration="160"
+                    android:interpolator="@android:interpolator/fast_out_slow_in"
+                    android:propertyName="alpha"
+                    android:valueFrom="0"
+                    android:valueTo="1"
+                    android:valueType="floatType" />
+                <objectAnimator
+                    android:duration="160"
+                    android:interpolator="@android:interpolator/fast_out_slow_in"
+                    android:propertyName="rotation"
+                    android:valueFrom="0"
+                    android:valueTo="360"
+                    android:valueType="floatType" />
+            </set>
+        </aapt:attr>
+    </target>
+
+    <!-- Phase 2 (130–330ms): bolt draws top→bottom; Phase 3 colour glow at 360ms -->
+    <target android:name="boltPath">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <objectAnimator
+                    android:duration="200"
+                    android:interpolator="@android:interpolator/fast_out_slow_in"
+                    android:propertyName="trimPathEnd"
+                    android:startOffset="130"
+                    android:valueFrom="0"
+                    android:valueTo="1"
+                    android:valueType="floatType" />
+                <objectAnimator
+                    android:duration="65"
+                    android:interpolator="@android:interpolator/fast_out_slow_in"
+                    android:propertyName="fillColor"
+                    android:startOffset="360"
+                    android:valueFrom="#761923"
+                    android:valueTo="#F26A21"
+                    android:valueType="colorType" />
+                <objectAnimator
+                    android:duration="75"
+                    android:interpolator="@android:interpolator/fast_out_slow_in"
+                    android:propertyName="fillColor"
+                    android:startOffset="425"
+                    android:valueFrom="#F26A21"
+                    android:valueTo="#761923"
+                    android:valueType="colorType" />
+            </set>
+        </aapt:attr>
+    </target>
+
+    <!-- Phase 3 (360–500ms): bolt scale pulse synced with colour glow -->
+    <target android:name="boltGroup">
+        <aapt:attr name="android:animation">
+            <set android:ordering="together">
+                <objectAnimator
+                    android:duration="65"
+                    android:interpolator="@android:interpolator/fast_out_slow_in"
+                    android:propertyName="scaleX"
+                    android:startOffset="360"
+                    android:valueFrom="1.0"
+                    android:valueTo="1.1"
+                    android:valueType="floatType" />
+                <objectAnimator
+                    android:duration="65"
+                    android:interpolator="@android:interpolator/fast_out_slow_in"
+                    android:propertyName="scaleY"
+                    android:startOffset="360"
+                    android:valueFrom="1.0"
+                    android:valueTo="1.1"
+                    android:valueType="floatType" />
+                <objectAnimator
+                    android:duration="75"
+                    android:interpolator="@android:interpolator/fast_out_slow_in"
+                    android:propertyName="scaleX"
+                    android:startOffset="425"
+                    android:valueFrom="1.1"
+                    android:valueTo="1.0"
+                    android:valueType="floatType" />
+                <objectAnimator
+                    android:duration="75"
+                    android:interpolator="@android:interpolator/fast_out_slow_in"
+                    android:propertyName="scaleY"
+                    android:startOffset="425"
+                    android:valueFrom="1.1"
+                    android:valueTo="1.0"
+                    android:valueType="floatType" />
+            </set>
+        </aapt:attr>
+    </target>
+</animated-vector>

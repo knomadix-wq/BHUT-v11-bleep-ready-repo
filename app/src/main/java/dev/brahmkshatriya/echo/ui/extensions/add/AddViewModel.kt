@@ -1,0 +1,140 @@
+@file:Suppress("UNREACHABLE_CODE")
+
+package dev.brahmkshatriya.echo.ui.extensions.add
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dev.brahmkshatriya.echo.R
+import dev.brahmkshatriya.echo.common.helpers.ContinuationCallback.Companion.await
+import dev.brahmkshatriya.echo.common.models.Message
+import dev.brahmkshatriya.echo.di.App
+import dev.brahmkshatriya.echo.extensions.ExtensionLoader
+import dev.brahmkshatriya.echo.extensions.exceptions.InvalidExtensionListException
+import dev.brahmkshatriya.echo.ui.extensions.ExtensionsViewModel
+import dev.brahmkshatriya.echo.utils.AppUpdater.downloadUpdate
+import dev.brahmkshatriya.echo.utils.AppUpdater.getUpdateFileUrl
+import dev.brahmkshatriya.echo.utils.Serializer.toData
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.File
+
+class AddViewModel(
+    private val app: App,
+    private val extensionLoader: ExtensionLoader
+) : ViewModel() {
+
+    fun getList() = (addingFlow.value as? AddState.AddList)?.list.orEmpty()
+
+    fun selectAll(select: Boolean) {
+        val list = getList()
+        addingFlow.value = AddState.AddList(list.map { it.copy(isChecked = select) })
+    }
+
+    fun toggleItem(item: ExtensionAssetResponse, isChecked: Boolean) {
+        val list = getList()
+        val index = list.indexOfFirst { it.item.id == item.id }
+        if (index == -1) return
+        val currentItem = list[index]
+        addingFlow.value = AddState.AddList(list.toMutableList().apply {
+            set(index, currentItem.copy(isChecked = isChecked))
+        })
+    }
+
+    private val client = OkHttpClient()
+    private suspend fun getExtensionList(
+        link: String,
+        client: OkHttpClient
+    ) = withContext(Dispatchers.IO) {
+        runCatching {
+            val request = Request.Builder()
+                .addHeader("Cookie", "preview=1")
+                .url(link).build()
+            val body = client.newCall(request).await().body.string()
+            if (body.trimStart().startsWith("<")) throw Exception("URL returned an HTML page, not a valid extension list")
+            body.toData<List<ExtensionAssetResponse>>().getOrThrow()
+        }
+    }.getOrElse {
+        throw InvalidExtensionListException(link, it)
+    }
+
+    @Serializable
+    data class ExtensionAssetResponse(
+        val id: String,
+        val name: String,
+        val subtitle: String? = null,
+        val iconUrl: String? = null,
+        val updateUrl: String
+    )
+
+    sealed class AddState {
+        data object Init : AddState()
+        data object Loading : AddState()
+        data class AddList(val list: List<ExtensionsAddListAdapter.Item>?) : AddState()
+        data class Downloading(val item: ExtensionAssetResponse) : AddState()
+        data class Final(val files: List<File>) : AddState()
+    }
+
+    var opened = false
+    val addingFlow = MutableStateFlow<AddState>(AddState.Init)
+    fun addFromLinkOrCode(link: String) = viewModelScope.launch {
+        addingFlow.value = AddState.Loading
+        val actualLink = when {
+            link.startsWith("http://") or link.startsWith("https://") -> link
+            else -> "https://v.gd/$link"
+        }
+
+        val list = runCatching { getExtensionList(actualLink, client) }.getOrElse {
+            if (it is CancellationException) throw it
+            app.throwFlow.emit(it)
+            null
+        }
+        val installed = extensionLoader.all.value.map { it.id }
+        val shouldBeChecked = (list?.size ?: 0) <= 3
+        addingFlow.value = AddState.AddList(list?.map {
+            val isInstalled = it.id in installed
+            ExtensionsAddListAdapter.Item(
+                it,
+                isChecked = shouldBeChecked && !isInstalled,
+                isInstalled = isInstalled
+            )
+        })
+    }
+
+    fun download(
+        download: Boolean, extensionsViewModel: ExtensionsViewModel
+    ) = viewModelScope.launch {
+        val selected =
+            if (download) getList().filter { it.isChecked }.map { it.item } else listOf()
+        val files = selected.mapNotNull { item ->
+            addingFlow.value = AddState.Downloading(item)
+            val url = getUpdateFileUrl("", item.updateUrl, client).getOrElse {
+                if (it is CancellationException) throw it
+                app.throwFlow.emit(it)          // real error (network/parse) — already surfaced
+                return@mapNotNull null
+            }
+            if (url == null) {
+                // Success but no download URL. currentVersion is "" here, so a supported GitHub
+                // update_url always yields a URL — a null therefore means the source is unsupported/
+                // unusable (non-GitHub host, or empty update_url). Unlike the silent auto-check path,
+                // this is an EXPLICIT add, so surface why the item was skipped instead of dropping it.
+                app.messageFlow.emit(
+                    Message(app.context.getString(R.string.unsupported_update_source_for_x, item.name))
+                )
+                return@mapNotNull null
+            }
+            downloadUpdate(app.context, url, client).getOrElse {
+                if (it is CancellationException) throw it
+                app.throwFlow.emit(it)
+                null
+            }
+        }
+        extensionsViewModel.installWithPrompt(files)
+        addingFlow.value = AddState.Final(files)
+    }
+}

@@ -1,0 +1,275 @@
+package dev.brahmkshatriya.echo.extension.clients
+
+import dev.brahmkshatriya.echo.common.models.Streamable
+import dev.brahmkshatriya.echo.common.models.Streamable.Media.Companion.toMedia
+import dev.brahmkshatriya.echo.common.models.Streamable.Source.Companion.toSource
+import dev.brahmkshatriya.echo.common.models.Track
+import dev.brahmkshatriya.echo.extension.AudioStreamProvider
+import dev.brahmkshatriya.echo.extension.DeezerApi
+import dev.brahmkshatriya.echo.extension.DeezerExtension
+import dev.brahmkshatriya.echo.extension.DeezerParser
+import dev.brahmkshatriya.echo.extension.Utils
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.OkHttpClient
+
+class DeezerTrackClient(private val deezerExtension: DeezerExtension, private val api: DeezerApi, private val parser: DeezerParser) {
+
+    private val client: OkHttpClient get() = api.clientNP
+
+    private fun extractUrlFromJson(json: JsonObject): String? {
+        val data = json["data"]?.jsonArray?.firstOrNull()?.jsonObject ?: return null
+        val media = data["media"]?.jsonArray?.firstOrNull()?.jsonObject ?: return null
+        val source = media["sources"]?.jsonArray?.getOrNull(1)?.jsonObject
+            ?: media["sources"]?.jsonArray?.firstOrNull()?.jsonObject
+            ?: return null
+        return source["url"]?.jsonPrimitive?.content
+    }
+
+    private suspend fun createStreamableForQuality(track: Track, quality: String, retry: Boolean = true): Streamable {
+        return try {
+            val currentTrackId = track.id
+            val mediaJson =
+                if (quality != "128" && quality != "mp3") api.getMediaUrl(track, quality)
+                else api.getMP3MediaUrl(track, quality == "128")
+            val mjString = mediaJson.toString()
+            if (mjString.contains("License token has no sufficient rights on requested media")) return when (quality) {
+                "flac" -> createStreamableForQuality(track, "320", retry)
+                "320" -> throw Exception("Deezer 320 unavailable")
+                else -> throw Exception("Track not available on server")
+            }
+            val trackJsonData = mediaJson["data"]?.jsonArray?.firstOrNull()?.jsonObject
+            val mediaIsEmpty = trackJsonData?.get("media")?.jsonArray?.isEmpty() == true
+
+            val (finalUrl, fallbackTrack) = when {
+                mjString.contains("Track token has no sufficient rights on requested media") || mediaIsEmpty -> {
+                    val fallBackId = track.extras["FALLBACK_ID"].orEmpty()
+                    if (fallBackId.isBlank()) {
+                        throw Exception("Track not available on server")
+                    }
+
+                    val fallbackObject = api.track(fallBackId)
+                    val resultOj = fallbackObject["results"]?.jsonObject
+                        ?: throw Exception("Fallback track unavailable")
+                    val fallBackTrack = parser.run { resultOj.toTrack() }
+
+                    val fallbackMediaJson = when (quality) {
+                        "128" -> api.getMP3MediaUrl(fallBackTrack, true)
+                        "mp3" -> api.getMP3MediaUrl(fallBackTrack, false)
+                        else -> api.getMediaUrl(fallBackTrack, quality)
+                    }
+                    val url = extractUrlFromJson(fallbackMediaJson)
+                        ?: throw Exception("Fallback media unavailable")
+                    url to fallBackTrack
+                }
+
+                mjString.contains("An error occurred while decoding track token") -> {
+                    // Refresh the track/token, but preserve the requested quality.
+                    // The old Gladix branch always requested 128 kbps here,
+                    // which silently violated the bridge's highest-MP3 policy.
+                    val fallbackObject = api.track(currentTrackId)
+                    val resultOj = fallbackObject["results"]?.jsonObject
+                        ?: throw Exception("Track refresh unavailable")
+                    val refreshedTrack = parser.run { resultOj.toTrack() }
+
+                    val refreshedMediaJson = when (quality) {
+                        "128" -> api.getMP3MediaUrl(refreshedTrack, true)
+                        "mp3" -> api.getMP3MediaUrl(refreshedTrack, false)
+                        else -> api.getMediaUrl(refreshedTrack, quality)
+                    }
+                    val url = extractUrlFromJson(refreshedMediaJson)
+                        ?: throw Exception("Refreshed media unavailable")
+                    url to refreshedTrack
+                }
+
+                else -> {
+                    val url = extractUrlFromJson(mediaJson)!!
+                    url to null
+                }
+            }
+
+            val qualityValue = when (quality) {
+                "flac" -> 9
+                "320" -> 6
+                "128" -> 3
+                "mp3" -> 0
+                else -> 0
+            }
+            val qualityTitle = when (quality) {
+                "flac" -> "FLAC"
+                "320" -> "320kbps"
+                "128" -> "128kbps"
+                "mp3" -> "MP3"
+                else -> "UNKNOWN"
+            }
+            val keySourceId = fallbackTrack?.id ?: currentTrackId
+
+            Streamable.server(
+                id = finalUrl,
+                quality = qualityValue,
+                title = qualityTitle,
+                extras = mapOf("key" to Utils.createBlowfishKey(keySourceId))
+            )
+        } catch (e: Exception) {
+            if (e.message?.contains("Song not available") == true) {
+                if (retry) {
+                    // Deliberate best-effort fallback: the cause is logged above; rethrowing would change
+                    // the intended quality-fallback control flow. Suppressing Detekt SwallowedException here.
+                    @Suppress("SwallowedException")
+                    try {
+                        deezerExtension.handleArlExpiration()
+                        return createStreamableForQuality(track, quality, false)
+                    } catch (retryEx: Exception) {
+                        // Best-effort: proceed to quality fallback. Log so a failing ARL-refresh retry
+                        // (a token issue) isn't invisible — control flow unchanged.
+                        println("GladixDeezer createStreamableForQuality ARL-refresh retry failed id=${track.id} q=$quality: ${retryEx.message}")
+                    }
+                }
+            }
+
+            when (quality) {
+                "flac" -> createStreamableForQuality(track, "320", retry)
+                "320" -> throw Exception("Deezer 320 unavailable")
+                else -> throw Exception("Track not available on server")
+            }
+        }
+    }
+
+    suspend fun loadStreamableMedia(streamable: Streamable): Streamable.Media {
+        deezerExtension.handleArlExpiration()
+        val resolvedStreamable = if (streamable.id.startsWith(placeholderPrefix)) {
+            val info = streamable.id.removePrefix(placeholderPrefix).split(":")
+            val trackId = info[0]
+            val quality = info.getOrNull(1) ?: "320"
+            val newTrack = Track(
+                id = trackId,
+                title = quality,
+                extras = mapOf(
+                    "TRACK_TOKEN" to streamable.extras["TRACK_TOKEN"].orEmpty(),
+                    "FALLBACK_ID" to streamable.extras["FALLBACK_ID"].orEmpty()
+                )
+            )
+            var resolved: Streamable? = null
+            for (attempt in 0..1) {
+                if (attempt > 0) delay(2000L)
+                // Deliberate best-effort retry: the per-attempt cause is logged above; the loop retries and
+                // ends in the "not available after retries" throw. Rethrowing/chaining would change that
+                // retry control flow. Suppressing Detekt SwallowedException here.
+                @Suppress("SwallowedException")
+                try {
+                    resolved = createStreamableForQuality(newTrack, quality)
+                    break
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Retry on next attempt; log the real per-attempt cause so it isn't lost behind the
+                    // generic "not available after retries" throw below (token/stream-resolution path).
+                    println("GladixDeezer loadStreamableMedia attempt $attempt failed id=$trackId q=$quality: ${e.message}")
+                }
+            }
+            resolved ?: throw Exception("Track not available after retries: $trackId")
+        } else {
+            streamable
+        }
+
+        return if (resolvedStreamable.quality == 12) {
+            resolvedStreamable.id.toSource().toMedia()
+        } else {
+            Streamable.InputProvider { start, _ ->
+                val contentLength = Utils.getContentLength(resolvedStreamable.id, client)
+                Pair(
+                    AudioStreamProvider.openStream(resolvedStreamable, client, start),
+                    contentLength - start
+                )
+            }.toSource(id = resolvedStreamable.id).toMedia()
+        }
+    }
+
+    private val qualityOptions = listOf("320")
+
+    suspend fun loadTrack(original: Track): Track {
+        deezerExtension.handleArlExpiration()
+
+        if (original.type == Track.Type.Podcast) {
+            return original
+        }
+
+        // Self-heal a missing/empty TRACK_TOKEN (e.g. a context-less bare track recovered from an
+        // Android Auto cache-miss, or a stale persisted seed): re-fetch the track fresh by id so its
+        // streamables carry a valid token — and, for a thin recovered track, full metadata too. Gated
+        // on an EMPTY token, so the normal path (token already present) adds no network round-trip. On
+        // any failure we fall back to the original track unchanged — the stream-time token-error
+        // fallback in createStreamableForQuality still applies — never crashing. CancellationException
+        // is rethrown so coroutine cancellation is honoured.
+        val track = if (original.extras["TRACK_TOKEN"].isNullOrEmpty()) {
+            val fresh = runCatching {
+                api.track(original.id)["results"]?.jsonObject?.let { results ->
+                    parser.run { results.toTrack() }
+                }
+            }.getOrElse { if (it is CancellationException) throw it else null }
+            when {
+                fresh == null -> original
+                // Seed already carries display metadata (e.g. a FALLBACK-grafted playlist track whose
+                // top-level TRACK_TOKEN was empty): KEEP the seed's artists/album/cover/background and take
+                // ONLY the token/streamable extras from the fresh fetch. Re-fetching by the top-level id
+                // returns the substitute's OWN (un-grafted) record, so replacing wholesale would discard the
+                // graft and show the wrong/old cover in the player (the fullscreen ViewHolder reads the loaded
+                // track). Streaming is unaffected: track.id stays the top-level id and we take fresh's TOKEN.
+                original.cover != null || original.artists.isNotEmpty() || original.album != null ->
+                    original.copy(extras = original.extras + fresh.extras)
+                // Thin recovered track (context-less/bare, e.g. an Android Auto cache-miss): no display
+                // metadata to preserve → use the full fresh fetch.
+                else -> fresh
+            }
+        } else original
+
+        val isMp3Misc = track.extras["FILESIZE_MP3_MISC"]?.let { it != "0" } ?: false
+
+        val streamables = if (isMp3Misc) {
+            listOf(
+                Streamable.server(
+                    id = "$placeholderPrefix${track.id}:mp3",
+                    quality = 0,
+                    title = "MP3",
+                    extras = mapOf(
+                        "TRACK_TOKEN" to track.extras["TRACK_TOKEN"].orEmpty(),
+                        "FALLBACK_ID" to track.extras["FALLBACK_ID"].orEmpty()
+                    )
+                )
+            )
+        } else {
+            qualityOptions.map { quality ->
+                val qualityValue = when (quality) {
+                    "flac" -> 9
+                    "320" -> 6
+                    "128" -> 3
+                    else -> 0
+                }
+                val qualityTitle = when (quality) {
+                    "flac" -> "FLAC"
+                    "320" -> "320kbps"
+                    "128" -> "128kbps"
+                    else -> "UNKNOWN"
+                }
+                Streamable.server(
+                    id = "$placeholderPrefix${track.id}:$quality",
+                    quality = qualityValue,
+                    title = qualityTitle,
+                    extras = mapOf(
+                        "TRACK_TOKEN" to track.extras["TRACK_TOKEN"].orEmpty(),
+                        "FALLBACK_ID" to track.extras["FALLBACK_ID"].orEmpty()
+                    )
+                )
+            }
+        }
+        return track.copy(
+            streamables = streamables
+        )
+    }
+
+    private val placeholderPrefix = "dzp:"
+}
