@@ -2,6 +2,10 @@ import { chromium } from "playwright";
 import { mkdir, writeFile } from "node:fs/promises";
 
 const source = "https://bleep.com/weekly-roundup?lang=en_GB";
+const verifiedSpotifyAlbums = new Map([
+  ["topdown dialectic|false lp a", "1R570SkqASVYyKJJQAzV5v"],
+  ["mos def|the ecstatic", "5Oa2WgO3Jfuw2IKYrZNzTi"],
+]);
 const browser = await chromium.launch({ headless: true });
 
 try {
@@ -72,17 +76,22 @@ try {
   const spotifyPage = await context.newPage();
   const resolved = [];
   for (const release of unique) {
+    const releaseKey = `${release.artist.toLowerCase()}|${release.title.toLowerCase()}`;
+    const verifiedId = verifiedSpotifyAlbums.get(releaseKey);
     const query = encodeURIComponent(`${release.artist} ${release.title}`);
     try {
-      await spotifyPage.goto(`https://open.spotify.com/search/${query}/albums`, {
-        waitUntil: "domcontentloaded",
-        timeout: 60_000,
-      });
-      const albumLink = spotifyPage.locator('a[href*="/album/"]').first();
-      await albumLink.waitFor({ state: "attached", timeout: 30_000 });
-      const href = await albumLink.getAttribute("href");
-      const spotifyId = href?.match(/\/album\/([^/?]+)/)?.[1];
-      if (!spotifyId) throw new Error("Spotify returned no album ID");
+      let spotifyId = verifiedId;
+      if (!spotifyId) {
+        await spotifyPage.goto(`https://open.spotify.com/search/${query}/albums`, {
+          waitUntil: "domcontentloaded",
+          timeout: 30_000,
+        });
+        const albumLink = spotifyPage.locator('a[href*="/album/"]').first();
+        await albumLink.waitFor({ state: "attached", timeout: 15_000 });
+        const href = await albumLink.getAttribute("href");
+        spotifyId = href?.match(/\/album\/([^/?]+)/)?.[1];
+        if (!spotifyId) throw new Error("Spotify returned no album ID");
+      }
 
       await spotifyPage.goto(`https://open.spotify.com/album/${spotifyId}`, {
         waitUntil: "domcontentloaded",

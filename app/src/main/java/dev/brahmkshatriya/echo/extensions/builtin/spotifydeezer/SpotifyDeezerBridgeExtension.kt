@@ -3,6 +3,7 @@ package dev.brahmkshatriya.echo.extensions.builtin.spotifydeezer
 import dev.brahmkshatriya.echo.common.MusicExtension
 import dev.brahmkshatriya.echo.common.clients.*
 import dev.brahmkshatriya.echo.common.models.*
+import dev.brahmkshatriya.echo.common.models.Feed.Companion.loadAll
 import dev.brahmkshatriya.echo.common.models.Feed.Companion.toFeedData
 import dev.brahmkshatriya.echo.common.models.ImageHolder.Companion.toImageHolder
 import dev.brahmkshatriya.echo.common.providers.MusicExtensionsProvider
