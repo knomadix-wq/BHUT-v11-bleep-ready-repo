@@ -1,13 +1,20 @@
 {
-  "updatedAt": "2026-08-17T07:28:39.910Z",
+  "updatedAt": "2026-08-17T23:10:35.704Z",
   "source": "https://bleep.com/weekly-roundup?lang=en_GB",
   "releases": [
+    {
+      "artist": "Overmono",
+      "title": "Pure Devotion",
+      "section": "Record of the Month",
+      "spotifyId": "0DS9OxHBt693YOs3TDira2",
+      "cover": "https://image-cdn-fa.spotifycdn.com/image/ab67616d00001e0258e6ed619438202bb108ec6f"
+    },
     {
       "artist": "Topdown Dialectic",
       "title": "False LP A",
       "section": "Release of the Week",
       "spotifyId": "1R570SkqASVYyKJJQAzV5v",
-      "cover": "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e02f62e019a91013abe13fbc838"
+      "cover": "https://image-cdn-fa.spotifycdn.com/image/ab67616d00001e02f62e019a91013abe13fbc838"
     },
     {
       "artist": "Phoebe Bridgers",
@@ -15,6 +22,34 @@
       "section": "Featured Releases",
       "spotifyId": "2NSzwyYvQvdOQAoEjrlw9c",
       "cover": "https://image-cdn-fa.spotifycdn.com/image/ab67616d00001e0225a647ace83ba32770ab5d0f"
+    },
+    {
+      "artist": "Sam Gendel, Sam Wilkes",
+      "title": "Music for Saxofone & Bass Guitar",
+      "section": "Featured Releases",
+      "spotifyId": "1KmiuFk2UY46iBvDsNMcBL",
+      "cover": "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e02f60e56ee3f7102d04e6f6186"
+    },
+    {
+      "artist": "James Ellis Ford",
+      "title": "Lost In Another World",
+      "section": "Featured Releases",
+      "spotifyId": "6a4PjuIDMW3kxLNuoi4LXf",
+      "cover": "https://image-cdn-fa.spotifycdn.com/image/ab67616d00001e02efcbb56214a2b84aaf20ded9"
+    },
+    {
+      "artist": "L'Rain",
+      "title": "fata morgana",
+      "section": "Featured Albums",
+      "spotifyId": "6jqiV5zozY66Gaw6YiFW2g",
+      "cover": "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e029ea5a26ce4370090fc6698f4"
+    },
+    {
+      "artist": "Justine Perry, Paula Koski",
+      "title": "Paired Works",
+      "section": "Featured Albums",
+      "spotifyId": "3grs2Jp8yh0DkP0rg5FESK",
+      "cover": "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e028155f402a5bbb3cd3f51900b"
     }
   ]
 }
