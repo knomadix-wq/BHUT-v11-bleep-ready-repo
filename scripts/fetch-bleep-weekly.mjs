@@ -80,7 +80,12 @@ try {
     const verifiedId = verifiedSpotifyAlbums.get(releaseKey);
     const query = encodeURIComponent(`${release.artist} ${release.title}`);
     try {
-      let spotifyId = verifiedId;
+      if (verifiedId) {
+        resolved.push({ ...release, spotifyId: verifiedId, cover: null });
+        console.log(`Used verified Spotify album for ${release.artist} — ${release.title}`);
+        continue;
+      }
+      let spotifyId;
       if (!spotifyId) {
         await spotifyPage.goto(`https://open.spotify.com/search/${query}/albums`, {
           waitUntil: "domcontentloaded",
@@ -93,12 +98,7 @@ try {
         if (!spotifyId) throw new Error("Spotify returned no album ID");
       }
 
-      await spotifyPage.goto(`https://open.spotify.com/album/${spotifyId}`, {
-        waitUntil: "domcontentloaded",
-        timeout: 60_000,
-      });
-      const cover = await spotifyPage.locator('meta[property="og:image"]').getAttribute("content");
-      resolved.push({ ...release, spotifyId, cover: cover || null });
+      resolved.push({ ...release, spotifyId, cover: null });
       console.log(`Resolved ${release.artist} — ${release.title} to ${spotifyId}`);
     } catch (error) {
       console.warn(`Skipped ${release.artist} — ${release.title}: ${error.message}`);

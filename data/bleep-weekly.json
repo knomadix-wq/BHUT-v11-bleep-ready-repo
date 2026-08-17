@@ -1,41 +1,20 @@
 {
-  "updatedAt": "2026-08-17T02:22:43.004Z",
+  "updatedAt": "2026-08-17T06:12:00.000Z",
   "source": "https://bleep.com/weekly-roundup?lang=en_GB",
   "releases": [
     {
       "artist": "Topdown Dialectic",
       "title": "False LP A",
-      "section": "Release of the Week"
-    },
-    {
-      "artist": "cv313",
-      "title": "Echospace [Detroit] Presents: Altering Illusions",
-      "section": "Featured Releases"
+      "section": "Release of the Week",
+      "spotifyId": "1R570SkqASVYyKJJQAzV5v",
+      "cover": null
     },
     {
       "artist": "Mos Def",
       "title": "The Ecstatic",
-      "section": "Featured Releases"
-    },
-    {
-      "artist": "Phoebe Bridgers",
-      "title": "Lost weekend",
-      "section": "Featured Releases"
-    },
-    {
-      "artist": "Sam Gendel, Sam Wilkes",
-      "title": "Music for Saxofone & Bass Guitar",
-      "section": "Featured Releases"
-    },
-    {
-      "artist": "Djrum",
-      "title": "I Wander (EP)",
-      "section": "Featured Releases"
-    },
-    {
-      "artist": "James Ellis Ford",
-      "title": "Lost In Another World",
-      "section": "Featured Releases"
+      "section": "Featured Releases",
+      "spotifyId": "5Oa2WgO3Jfuw2IKYrZNzTi",
+      "cover": null
     }
   ]
 }
