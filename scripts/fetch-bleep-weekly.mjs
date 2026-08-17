@@ -4,8 +4,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 const source = "https://bleep.com/weekly-roundup?lang=en_GB";
 const verifiedSpotifyAlbums = new Map([
   ["topdown dialectic|false lp a", "1R570SkqASVYyKJJQAzV5v"],
-  ["mos def|the ecstatic", "5Oa2WgO3Jfuw2IKYrZNzTi"],
 ]);
+const excludedReleases = new Set(["mos def|the ecstatic"]);
 const normalise = (value) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 
 async function spotifyArtwork(spotifyId, expectedTitle) {
@@ -50,6 +50,19 @@ try {
   const end = endCandidate > start ? endCandidate : lines.length;
 
   const releases = [];
+  const recordOfMonth = await page.getByRole("heading", {
+    name: "Record of the Month",
+    exact: true,
+  }).evaluate((heading) => {
+    const section = heading.parentElement;
+    return {
+      artist: section?.querySelector("dd.artist")?.textContent?.trim() || "",
+      title: section?.querySelector("dd.release-title")?.textContent?.trim() || "",
+      section: "Record of the Month",
+    };
+  }).catch(() => null);
+  if (recordOfMonth?.artist && recordOfMonth?.title) releases.push(recordOfMonth);
+
   const featuredStart = lines.findIndex(
     (line, index) => index > start && /^Featured Releases$/i.test(line),
   );
@@ -81,9 +94,33 @@ try {
     }
   }
 
+  const featuredAlbumsStart = lines.findIndex(
+    (line, index) => index > start && /^Featured Albums$/i.test(line),
+  );
+  if (featuredAlbumsStart > start) {
+    const featuredAlbumsEndCandidate = lines.findIndex(
+      (line, index) => index > featuredAlbumsStart && /^View More$/i.test(line),
+    );
+    const featuredAlbumsEnd = featuredAlbumsEndCandidate > featuredAlbumsStart
+      ? featuredAlbumsEndCandidate
+      : end;
+    const featuredAlbumLines = lines
+      .slice(featuredAlbumsStart + 1, featuredAlbumsEnd)
+      .filter((line) => !/^Unavailable$/i.test(line));
+    for (let i = 0; i + 2 < featuredAlbumLines.length; i += 3) {
+      releases.push({
+        artist: featuredAlbumLines[i],
+        title: featuredAlbumLines[i + 1],
+        section: "Featured Albums",
+      });
+    }
+  }
+
   const unique = [...new Map(
     releases.map((item) => [`${item.artist.toLowerCase()}|${item.title.toLowerCase()}`, item]),
-  ).values()].slice(0, 4);
+  ).values()]
+    .filter((item) => !excludedReleases.has(`${item.artist.toLowerCase()}|${item.title.toLowerCase()}`))
+    .slice(0, 12);
   if (!unique.length) {
     console.error("Bleep section preview:", lines.slice(start, Math.min(start + 80, end)).join(" | "));
     throw new Error("Bleep page produced no releases; keeping the last good feed");

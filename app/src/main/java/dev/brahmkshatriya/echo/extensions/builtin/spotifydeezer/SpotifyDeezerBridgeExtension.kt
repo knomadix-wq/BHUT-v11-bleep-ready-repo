@@ -47,7 +47,7 @@ class SpotifyDeezerBridgeExtension :
             type = ExtensionType.MUSIC,
             id = ID,
             name = "Spotify → Deezer MP3",
-            version = "v14",
+            version = "v15",
             description = "Spotify browsing and library with Deezer MP3 playback, Deezer radio, and Bleep weekly releases.",
             author = "BHUT",
             isEnabled = true,
@@ -107,7 +107,7 @@ class SpotifyDeezerBridgeExtension :
 
     private suspend fun buildBleepShelf(): Shelf.Lists.Items? {
         val releases = runCatching { withTimeoutOrNull(5_000) { fetchBleepWeeklyReleases() } }
-            .onFailure { println("BHUT Bleep live feed: ${it.message}; using V14 fallback") }
+            .onFailure { println("BHUT Bleep live feed: ${it.message}; using V15 fallback") }
             .getOrNull()
             .orEmpty()
             .ifEmpty { fallbackBleepReleases() }
@@ -131,9 +131,9 @@ class SpotifyDeezerBridgeExtension :
         if (albums.isEmpty()) return null
         return Shelf.Lists.Items(
             id = "bhut-bleep-weekly",
-            title = "Bleep Weekly • V14",
+            title = "Bleep Weekly • V15",
             list = albums,
-            subtitle = "Release of the Week + Featured Releases",
+            subtitle = "Record of the Month + weekly and featured picks",
         )
     }
 
@@ -142,7 +142,7 @@ class SpotifyDeezerBridgeExtension :
             cachedBleepReleases?.let { return@withLock it }
             val request = Request.Builder()
                 .url(BLEEP_FEED_URL)
-                .header("User-Agent", "BHUT/14")
+                .header("User-Agent", "BHUT/15")
                 .build()
             val json = bleepHttp.newCall(request).await().use { response ->
                 if (!response.isSuccessful) error("Bleep feed HTTP ${response.code}")
@@ -171,7 +171,6 @@ class SpotifyDeezerBridgeExtension :
 
     private fun fallbackBleepReleases() = listOf(
         BleepRelease("Topdown Dialectic", "False LP A", "1R570SkqASVYyKJJQAzV5v", "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e02f62e019a91013abe13fbc838"),
-        BleepRelease("Mos Def", "The Ecstatic", "5Oa2WgO3Jfuw2IKYrZNzTi", "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e02cca74dedca4fb2c9bf526fd8"),
         BleepRelease("Phoebe Bridgers", "Lost Weekend", "2NSzwyYvQvdOQAoEjrlw9c", "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e0225a647ace83ba32770ab5d0f"),
     )
 
