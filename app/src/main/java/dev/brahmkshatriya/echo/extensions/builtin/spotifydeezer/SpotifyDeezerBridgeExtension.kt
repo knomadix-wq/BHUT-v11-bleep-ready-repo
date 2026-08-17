@@ -87,7 +87,7 @@ class SpotifyDeezerBridgeExtension :
         return Feed(spotifyFeed.tabs) { tab ->
             val spotifyData = spotifyFeed.getPagedData(tab)
             val bleepShelf = if (tab == null || tab == spotifyFeed.notSortTabs.firstOrNull()) {
-                runCatching { withTimeoutOrNull(4_000) { buildBleepShelf() } }
+                runCatching { withTimeoutOrNull(8_000) { buildBleepShelf() } }
                     .onFailure { println("BHUT Bleep: ${it.message}") }
                     .getOrNull()
             } else null
@@ -106,7 +106,7 @@ class SpotifyDeezerBridgeExtension :
         val releases = fetchBleepWeeklyReleases()
         if (releases.isEmpty()) return null
         val albums = supervisorScope {
-            releases.map { release ->
+            releases.take(4).map { release ->
                 async { runCatching { resolveSpotifyAlbum(release) }.getOrNull() }
             }.awaitAll().filterNotNull()
         }
