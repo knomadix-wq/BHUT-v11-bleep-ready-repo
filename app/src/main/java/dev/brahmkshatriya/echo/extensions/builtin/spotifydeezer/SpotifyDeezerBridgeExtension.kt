@@ -12,6 +12,10 @@ import dev.brahmkshatriya.echo.common.settings.Setting
 import dev.brahmkshatriya.echo.common.settings.Settings
 import dev.brahmkshatriya.echo.extension.DeezerExtension
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -83,7 +87,7 @@ class SpotifyDeezerBridgeExtension :
         return Feed(spotifyFeed.tabs) { tab ->
             val spotifyData = spotifyFeed.getPagedData(tab)
             val bleepShelf = if (tab == null || tab == spotifyFeed.notSortTabs.firstOrNull()) {
-                runCatching { buildBleepShelf() }
+                runCatching { withTimeoutOrNull(4_000) { buildBleepShelf() } }
                     .onFailure { println("BHUT Bleep: ${it.message}") }
                     .getOrNull()
             } else null
@@ -101,7 +105,11 @@ class SpotifyDeezerBridgeExtension :
     private suspend fun buildBleepShelf(): Shelf.Lists.Items? {
         val releases = fetchBleepWeeklyReleases()
         if (releases.isEmpty()) return null
-        val albums = releases.mapNotNull { release -> resolveSpotifyAlbum(release) }
+        val albums = supervisorScope {
+            releases.map { release ->
+                async { runCatching { resolveSpotifyAlbum(release) }.getOrNull() }
+            }.awaitAll().filterNotNull()
+        }
         if (albums.isEmpty()) return null
         return Shelf.Lists.Items(
             id = "bhut-bleep-weekly",
