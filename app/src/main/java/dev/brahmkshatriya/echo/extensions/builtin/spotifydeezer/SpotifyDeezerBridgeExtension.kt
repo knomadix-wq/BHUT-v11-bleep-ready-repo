@@ -6,12 +6,14 @@ import dev.brahmkshatriya.echo.common.models.*
 import dev.brahmkshatriya.echo.common.models.Feed.Companion.loadAll
 import dev.brahmkshatriya.echo.common.models.Feed.Companion.toFeedData
 import dev.brahmkshatriya.echo.common.models.ImageHolder.Companion.toImageHolder
+import dev.brahmkshatriya.echo.common.models.Streamable.Media.Companion.toServerMedia
 import dev.brahmkshatriya.echo.common.providers.MusicExtensionsProvider
 import dev.brahmkshatriya.echo.common.helpers.ContinuationCallback.Companion.await
 import dev.brahmkshatriya.echo.common.helpers.PagedData
 import dev.brahmkshatriya.echo.common.settings.Setting
 import dev.brahmkshatriya.echo.common.settings.Settings
 import dev.brahmkshatriya.echo.extension.DeezerExtension
+import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -47,8 +49,8 @@ class SpotifyDeezerBridgeExtension :
             type = ExtensionType.MUSIC,
             id = ID,
             name = "Spotify → Deezer MP3",
-            version = "v15",
-            description = "Spotify browsing and library with Deezer MP3 playback, Deezer radio, and Bleep weekly releases.",
+            version = "v16",
+            description = "Spotify browsing with Deezer MP3 playback, Bleep picks, and the latest NTS archives.",
             author = "BHUT",
             isEnabled = true,
         )
@@ -57,6 +59,9 @@ class SpotifyDeezerBridgeExtension :
         private val spotifyToDeezer = ConcurrentHashMap<String, String>()
         private const val DIRECT_DEEZER_ITEM = "bridge_direct_deezer"
         private const val DEEZER_RADIO = "bridge_deezer_radio"
+        private const val NTS_ITEM = "bridge_nts_archive"
+        private const val NTS_TOKEN = "bridge_nts_token"
+        private const val NTS_LATEST_URL = "https://www.nts.live/latest"
         private const val BLEEP_FEED_URL =
             "https://raw.githubusercontent.com/knomadix-wq/BHUT-v12-bleep-ready-repo/main/data/bleep-weekly.json"
         private val bleepHttp = OkHttpClient()
@@ -66,6 +71,8 @@ class SpotifyDeezerBridgeExtension :
     private var extensions: List<MusicExtension> = emptyList()
     private val bleepFeedMutex = Mutex()
     private var cachedBleepReleases: List<BleepRelease>? = null
+    private val ntsFeedMutex = Mutex()
+    private var cachedNtsEpisodes: List<Track>? = null
 
     override fun setMusicExtensions(extensions: List<MusicExtension>) {
         this.extensions = extensions
@@ -89,9 +96,12 @@ class SpotifyDeezerBridgeExtension :
         return Feed(spotifyFeed.tabs) { tab ->
             val spotifyData = spotifyFeed.getPagedData(tab)
             val bleepShelf = buildBleepShelf()
+            val ntsShelf = runCatching { withTimeoutOrNull(8_000) { buildNtsShelf() } }
+                .onFailure { println("BHUT NTS: ${it.message}") }
+                .getOrNull()
             spotifyData.copy(
                 pagedData = PagedData.Concat(
-                    PagedData.Single { listOfNotNull(bleepShelf) },
+                    PagedData.Single { listOfNotNull(ntsShelf, bleepShelf) },
                     spotifyData.pagedData,
                 ),
             )
@@ -107,7 +117,7 @@ class SpotifyDeezerBridgeExtension :
 
     private suspend fun buildBleepShelf(): Shelf.Lists.Items? {
         val releases = runCatching { withTimeoutOrNull(5_000) { fetchBleepWeeklyReleases() } }
-            .onFailure { println("BHUT Bleep live feed: ${it.message}; using V15 fallback") }
+            .onFailure { println("BHUT Bleep live feed: ${it.message}; using V16 fallback") }
             .getOrNull()
             .orEmpty()
             .ifEmpty { fallbackBleepReleases() }
@@ -131,7 +141,7 @@ class SpotifyDeezerBridgeExtension :
         if (albums.isEmpty()) return null
         return Shelf.Lists.Items(
             id = "bhut-bleep-weekly",
-            title = "Bleep Weekly • V15",
+            title = "Bleep Weekly • V16",
             list = albums,
             subtitle = "Record of the Month + weekly and featured picks",
         )
@@ -174,6 +184,95 @@ class SpotifyDeezerBridgeExtension :
         BleepRelease("Phoebe Bridgers", "Lost Weekend", "2NSzwyYvQvdOQAoEjrlw9c", "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e0225a647ace83ba32770ab5d0f"),
     )
 
+    private suspend fun buildNtsShelf(): Shelf.Lists.Items? {
+        val episodes = fetchNtsEpisodes()
+        if (episodes.isEmpty()) return null
+        return Shelf.Lists.Items(
+            id = "bhut-nts-latest",
+            title = "NTS Latest Archives • V16",
+            list = episodes,
+            subtitle = "Newest playable mixes from the NTS archive",
+        )
+    }
+
+    private suspend fun fetchNtsEpisodes(): List<Track> = ntsFeedMutex.withLock {
+        cachedNtsEpisodes?.let { return@withLock it }
+        val html = bleepHttp.newCall(
+            Request.Builder().url(NTS_LATEST_URL).header("User-Agent", "BHUT/16").build()
+        ).await().use { response ->
+            if (!response.isSuccessful) error("NTS latest HTTP ${response.code}")
+            response.body.string()
+        }
+        val token = Regex("""NTS_API_TOKEN\"\s*:\s*\"([^\"]+)""")
+            .find(html)?.groupValues?.getOrNull(1)
+            ?: error("NTS stream token missing")
+        val marker = "window._REACT_STATE_ = "
+        val stateStart = html.indexOf(marker).takeIf { it >= 0 }?.plus(marker.length)
+            ?: error("NTS archive state missing")
+        val stateEnd = html.indexOf(";</script>", stateStart).takeIf { it > stateStart }
+            ?: error("NTS archive state incomplete")
+        val episodes = JSONObject(html.substring(stateStart, stateEnd))
+            .getJSONObject("recentlyAdded")
+            .getJSONArray("episodes")
+        val tracks = buildList {
+            for (i in 0 until episodes.length()) {
+                val episode = episodes.optJSONObject(i) ?: continue
+                val sources = episode.optJSONArray("audio_sources") ?: continue
+                val source = (0 until sources.length()).firstNotNullOfOrNull { index ->
+                    sources.optJSONObject(index)
+                        ?.takeIf { it.optString("source") == "soundcloud" }
+                        ?.optString("url")
+                        ?.takeIf { it.isNotBlank() }
+                } ?: continue
+                val show = episode.optString("show_alias").trim()
+                val alias = episode.optString("episode_alias").trim()
+                val title = episode.optString("name").trim()
+                if (show.isBlank() || alias.isBlank() || title.isBlank()) continue
+                val media = episode.optJSONObject("media")
+                val cover = media?.optString("picture_medium_large")
+                    ?.takeIf { it.isNotBlank() }
+                    ?.toImageHolder()
+                val date = episode.optString("broadcastDateFormatted").trim()
+                val location = episode.optString("location_long").trim()
+                val streamExtras = mapOf(NTS_ITEM to "true", NTS_TOKEN to token)
+                add(
+                    Track(
+                        id = "nts:$show/$alias",
+                        title = title,
+                        type = Track.Type.Podcast,
+                        cover = cover,
+                        artists = listOf(
+                            Artist(
+                                id = "nts-radio",
+                                name = "NTS Radio",
+                                isRadioSupported = false,
+                                isFollowable = false,
+                                isSaveable = false,
+                                isShareable = false,
+                            )
+                        ),
+                        subtitle = listOf(date, location).filter { it.isNotBlank() }.joinToString(" • "),
+                        genres = episode.optJSONArray("genres")?.let { genres ->
+                            (0 until genres.length()).mapNotNull { index ->
+                                genres.optJSONObject(index)?.optString("value")?.takeIf { it.isNotBlank() }
+                            }
+                        }.orEmpty(),
+                        extras = streamExtras,
+                        streamables = listOf(Streamable.server(source, 2, "NTS Archive", streamExtras)),
+                        isRadioSupported = false,
+                        isSaveable = false,
+                        isLikeable = false,
+                        isHideable = false,
+                        isShareable = false,
+                    )
+                )
+                if (size >= 12) break
+            }
+        }
+        cachedNtsEpisodes = tracks
+        tracks
+    }
+
     override suspend fun loadSearchFeed(query: String): Feed<Shelf> =
         client<SearchFeedClient>("spotify").loadSearchFeed(query)
 
@@ -205,11 +304,13 @@ class SpotifyDeezerBridgeExtension :
         client<ArtistClient>("spotify").loadFeed(artist)
 
     override suspend fun loadFeed(track: Track): Feed<Shelf>? {
+        if (track.extras[NTS_ITEM] == "true") return null
         val spotifyId = track.extras["bridge_spotify_id"] ?: track.id
         return client<TrackClient>("spotify").loadFeed(track.copy(id = spotifyId))
     }
 
     override suspend fun loadTrack(track: Track, isDownload: Boolean): Track {
+        if (track.extras[NTS_ITEM] == "true") return track
         val deezer = client<DeezerExtension>("deezer")
         val isDirectDeezer = track.extras[DIRECT_DEEZER_ITEM] == "true"
         val spotifyId = track.extras["bridge_spotify_id"] ?: track.id
@@ -465,8 +566,22 @@ class SpotifyDeezerBridgeExtension :
     override suspend fun loadStreamableMedia(
         streamable: Streamable,
         isDownload: Boolean,
-    ): Streamable.Media =
-        runCatching {
+    ): Streamable.Media {
+        if (streamable.extras[NTS_ITEM] == "true") {
+            val token = streamable.extras[NTS_TOKEN] ?: error("NTS stream token unavailable")
+            val encoded = URLEncoder.encode(streamable.id, "UTF-8")
+            val request = Request.Builder()
+                .url("https://www.nts.live/api/v2/resolve-stream?url=$encoded")
+                .header("Accept", "application/json")
+                .header("Authorization", "Basic $token")
+                .build()
+            val hls = bleepHttp.newCall(request).await().use { response ->
+                if (!response.isSuccessful) error("NTS stream HTTP ${response.code}")
+                JSONObject(response.body.string()).getString("hls")
+            }
+            return hls.toServerMedia(type = Streamable.SourceType.HLS)
+        }
+        return runCatching {
             client<TrackClient>("deezer").loadStreamableMedia(streamable, isDownload)
         }.getOrElse { cause ->
             throw IllegalStateException(
@@ -474,4 +589,5 @@ class SpotifyDeezerBridgeExtension :
                 cause,
             )
         }
+    }
 }
