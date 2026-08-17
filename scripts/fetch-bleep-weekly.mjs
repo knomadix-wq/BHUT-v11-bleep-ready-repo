@@ -37,20 +37,36 @@ try {
       continue;
     }
     if (!/^Artist$/i.test(lines[i]) || !lines[i + 1]) continue;
-    const releaseMarker = lines
-      .slice(i + 2, Math.min(i + 10, end))
-      .findIndex((line) => /^ReleaseProduct$/i.test(line));
-    if (releaseMarker < 0) continue;
-    const marker = i + 2 + releaseMarker;
-    if (!lines[marker + 1]) continue;
+    const nearby = lines.slice(i + 2, Math.min(i + 12, end));
+    const releaseMarker = nearby.findIndex((line) => /^Release\s*Product$/i.test(line));
+    const splitMarker = nearby.findIndex(
+      (line, index) => /^Release$/i.test(line) && /^Product$/i.test(nearby[index + 1] ?? ""),
+    );
+    const marker = releaseMarker >= 0
+      ? i + 2 + releaseMarker
+      : splitMarker >= 0
+        ? i + 3 + splitMarker
+        : -1;
+    if (marker < 0 || !lines[marker + 1]) continue;
     releases.push({ artist: lines[i + 1], title: lines[marker + 1], section });
     i = marker + 1;
+  }
+
+  if (!releases.length) {
+    const sectionPreview = lines.slice(start, Math.min(start + 100, end)).join("\n");
+    const pattern = /Artist\s+(.+?)\s+Release\s*Product\s+(.+?)\s+Label/gi;
+    for (const match of sectionPreview.matchAll(pattern)) {
+      releases.push({ artist: match[1].trim(), title: match[2].trim(), section: "Weekly Roundup" });
+    }
   }
 
   const unique = [...new Map(
     releases.map((item) => [`${item.artist.toLowerCase()}|${item.title.toLowerCase()}`, item]),
   ).values()].slice(0, 12);
-  if (!unique.length) throw new Error("Bleep page produced no releases; keeping the last good feed");
+  if (!unique.length) {
+    console.error("Bleep section preview:", lines.slice(start, Math.min(start + 80, end)).join(" | "));
+    throw new Error("Bleep page produced no releases; keeping the last good feed");
+  }
 
   await mkdir("data", { recursive: true });
   await writeFile(
