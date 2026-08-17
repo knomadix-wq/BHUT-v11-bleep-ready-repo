@@ -6,6 +6,22 @@ const verifiedSpotifyAlbums = new Map([
   ["topdown dialectic|false lp a", "1R570SkqASVYyKJJQAzV5v"],
   ["mos def|the ecstatic", "5Oa2WgO3Jfuw2IKYrZNzTi"],
 ]);
+const normalise = (value) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
+async function spotifyArtwork(spotifyId, expectedTitle) {
+  const response = await fetch(
+    `https://open.spotify.com/oembed?url=${encodeURIComponent(`https://open.spotify.com/album/${spotifyId}`)}`,
+  );
+  if (!response.ok) throw new Error(`Spotify artwork HTTP ${response.status}`);
+  const metadata = await response.json();
+  const actual = normalise(metadata.title || "");
+  const expected = normalise(expectedTitle);
+  if (!actual || (actual !== expected && !actual.includes(expected) && !expected.includes(actual))) {
+    throw new Error(`Spotify returned the wrong album: ${metadata.title || "unknown"}`);
+  }
+  if (!metadata.thumbnail_url) throw new Error("Spotify returned no artwork");
+  return metadata.thumbnail_url;
+}
 const browser = await chromium.launch({ headless: true });
 
 try {
@@ -81,7 +97,8 @@ try {
     const query = encodeURIComponent(`${release.artist} ${release.title}`);
     try {
       if (verifiedId) {
-        resolved.push({ ...release, spotifyId: verifiedId, cover: null });
+        const cover = await spotifyArtwork(verifiedId, release.title);
+        resolved.push({ ...release, spotifyId: verifiedId, cover });
         console.log(`Used verified Spotify album for ${release.artist} — ${release.title}`);
         continue;
       }
@@ -98,7 +115,8 @@ try {
         if (!spotifyId) throw new Error("Spotify returned no album ID");
       }
 
-      resolved.push({ ...release, spotifyId, cover: null });
+      const cover = await spotifyArtwork(spotifyId, release.title);
+      resolved.push({ ...release, spotifyId, cover });
       console.log(`Resolved ${release.artist} — ${release.title} to ${spotifyId}`);
     } catch (error) {
       console.warn(`Skipped ${release.artist} — ${release.title}: ${error.message}`);
