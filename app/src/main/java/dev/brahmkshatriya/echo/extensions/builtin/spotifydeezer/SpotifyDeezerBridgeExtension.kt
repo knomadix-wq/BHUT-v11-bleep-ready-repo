@@ -14,6 +14,7 @@ import dev.brahmkshatriya.echo.extension.DeezerExtension
 import java.util.concurrent.ConcurrentHashMap
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONObject
 import kotlin.math.abs
 
 /**
@@ -42,7 +43,7 @@ class SpotifyDeezerBridgeExtension :
             type = ExtensionType.MUSIC,
             id = ID,
             name = "Spotify → Deezer MP3",
-            version = "v11",
+            version = "v12",
             description = "Spotify browsing and library with Deezer MP3 playback, Deezer radio, and Bleep weekly releases.",
             author = "BHUT",
             isEnabled = true,
@@ -52,7 +53,8 @@ class SpotifyDeezerBridgeExtension :
         private val spotifyToDeezer = ConcurrentHashMap<String, String>()
         private const val DIRECT_DEEZER_ITEM = "bridge_direct_deezer"
         private const val DEEZER_RADIO = "bridge_deezer_radio"
-        private const val BLEEP_WEEKLY_URL = "https://bleep.com/weekly-roundup"
+        private const val BLEEP_FEED_URL =
+            "https://raw.githubusercontent.com/knomadix-wq/BHUT-v11-bleep-ready-repo/main/data/bleep-weekly.json"
         private val bleepHttp = OkHttpClient()
     }
 
@@ -111,48 +113,25 @@ class SpotifyDeezerBridgeExtension :
 
     private suspend fun fetchBleepWeeklyReleases(): List<BleepRelease> {
         val request = Request.Builder()
-            .url(BLEEP_WEEKLY_URL)
-            .header("User-Agent", "Mozilla/5.0 (Android) BHUT/11")
+            .url("$BLEEP_FEED_URL?ts=${System.currentTimeMillis()}")
+            .header("User-Agent", "BHUT/12")
+            .header("Cache-Control", "no-cache")
             .build()
-        val html = bleepHttp.newCall(request).await().use { response ->
-            if (!response.isSuccessful) error("Bleep HTTP ${response.code}")
+        val json = bleepHttp.newCall(request).await().use { response ->
+            if (!response.isSuccessful) error("Bleep feed HTTP ${response.code}")
             response.body.string()
         }
-        val text = html
-            .replace(Regex("""<script[\s\S]*?</script>""", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("""<style[\s\S]*?</style>""", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("<[^>]+>"), "\n")
-            .replace("&amp;", "&")
-            .replace("&quot;", "\"")
-            .replace("&#39;", "'")
-            .replace("&gt;", ">")
-            .replace("&lt;", "<")
-        val start = text.indexOf("Release of the Week", ignoreCase = true)
-        val end = text.indexOf("Download of the Week", startIndex = start.coerceAtLeast(0), ignoreCase = true)
-        if (start < 0) return emptyList()
-        val section = text.substring(start, if (end > start) end else text.length)
-        val lines = section.lines().map { it.trim() }.filter { it.isNotBlank() }
-        val releases = mutableListOf<BleepRelease>()
-        var i = 0
-        while (i < lines.size) {
-            if (lines[i].equals("Artist", ignoreCase = true) && i + 3 < lines.size) {
-                val artist = lines[i + 1]
-                val releaseMarker = lines.indexOfFirstFrom(i + 2) { it.equals("ReleaseProduct", ignoreCase = true) }
-                if (releaseMarker >= 0 && releaseMarker + 1 < lines.size) {
-                    val title = lines[releaseMarker + 1]
-                    if (artist.isNotBlank() && title.isNotBlank()) releases += BleepRelease(artist, title)
-                    i = releaseMarker + 2
-                    continue
-                }
+        val items = JSONObject(json).optJSONArray("releases") ?: return emptyList()
+        return buildList {
+            for (i in 0 until items.length()) {
+                val item = items.optJSONObject(i) ?: continue
+                val artist = item.optString("artist").trim()
+                val title = item.optString("title").trim()
+                if (artist.isNotBlank() && title.isNotBlank()) add(BleepRelease(artist, title))
             }
-            i++
         }
-        return releases.distinctBy { norm(it.artist) + "|" + norm(it.title) }.take(12)
-    }
-
-    private inline fun List<String>.indexOfFirstFrom(start: Int, predicate: (String) -> Boolean): Int {
-        for (i in start until minOf(size, start + 8)) if (predicate(this[i])) return i
-        return -1
+            .distinctBy { norm(it.artist) + "|" + norm(it.title) }
+            .take(12)
     }
 
     private suspend fun resolveSpotifyAlbum(release: BleepRelease): Album? {

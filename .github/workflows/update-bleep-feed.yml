@@ -1,0 +1,41 @@
+name: Update Bleep weekly feed
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/update-bleep-feed.yml"
+      - "scripts/fetch-bleep-weekly.mjs"
+  schedule:
+    - cron: "17 9 * * 5"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install browser
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Fetch Bleep roundup
+        run: node scripts/fetch-bleep-weekly.mjs
+      - name: Commit updated feed
+        run: |
+          if git diff --quiet -- data/bleep-weekly.json; then
+            echo "Feed is unchanged"
+            exit 0
+          fi
+          git config user.name "BHUT Feed Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/bleep-weekly.json
+          git commit -m "Update Bleep weekly feed"
+          git push
