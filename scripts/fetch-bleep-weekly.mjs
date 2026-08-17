@@ -30,33 +30,34 @@ try {
   const end = endCandidate > start ? endCandidate : lines.length;
 
   const releases = [];
-  let section = "Release of the Week";
-  for (let i = start + 1; i < end; i += 1) {
-    if (/^Featured Releases$/i.test(lines[i])) {
-      section = "Featured Releases";
-      continue;
-    }
-    if (!/^Artist$/i.test(lines[i]) || !lines[i + 1]) continue;
-    const nearby = lines.slice(i + 2, Math.min(i + 12, end));
-    const releaseMarker = nearby.findIndex((line) => /^Release\s*Product$/i.test(line));
-    const splitMarker = nearby.findIndex(
-      (line, index) => /^Release$/i.test(line) && /^Product$/i.test(nearby[index + 1] ?? ""),
-    );
-    const marker = releaseMarker >= 0
-      ? i + 2 + releaseMarker
-      : splitMarker >= 0
-        ? i + 3 + splitMarker
-        : -1;
-    if (marker < 0 || !lines[marker + 1]) continue;
-    releases.push({ artist: lines[i + 1], title: lines[marker + 1], section });
-    i = marker + 1;
+  const featuredStart = lines.findIndex(
+    (line, index) => index > start && /^Featured Releases$/i.test(line),
+  );
+
+  // The live Bleep page renders the lead item as artist, title, label, date.
+  if (featuredStart > start + 2) {
+    releases.push({
+      artist: lines[start + 1],
+      title: lines[start + 2],
+      section: "Release of the Week",
+    });
   }
 
-  if (!releases.length) {
-    const sectionPreview = lines.slice(start, Math.min(start + 100, end)).join("\n");
-    const pattern = /Artist\s+(.+?)\s+Release\s*Product\s+(.+?)\s+Label/gi;
-    for (const match of sectionPreview.matchAll(pattern)) {
-      releases.push({ artist: match[1].trim(), title: match[2].trim(), section: "Weekly Roundup" });
+  // Featured releases are rendered as repeated artist, title, label triplets.
+  if (featuredStart > start) {
+    const featuredEndCandidate = lines.findIndex(
+      (line, index) => index > featuredStart && /^View More$/i.test(line),
+    );
+    const featuredEnd = featuredEndCandidate > featuredStart ? featuredEndCandidate : end;
+    const featuredLines = lines
+      .slice(featuredStart + 1, featuredEnd)
+      .filter((line) => !/^Unavailable$/i.test(line));
+    for (let i = 0; i + 2 < featuredLines.length; i += 3) {
+      releases.push({
+        artist: featuredLines[i],
+        title: featuredLines[i + 1],
+        section: "Featured Releases",
+      });
     }
   }
 
