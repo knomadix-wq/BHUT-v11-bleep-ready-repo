@@ -58,7 +58,7 @@ class SpotifyDeezerBridgeExtension :
         private const val DIRECT_DEEZER_ITEM = "bridge_direct_deezer"
         private const val DEEZER_RADIO = "bridge_deezer_radio"
         private const val BLEEP_FEED_URL =
-            "https://raw.githubusercontent.com/knomadix-wq/BHUT-v11-bleep-ready-repo/main/data/bleep-weekly.json"
+            "https://raw.githubusercontent.com/knomadix-wq/BHUT-v12-bleep-ready-repo/main/data/bleep-weekly.json"
         private val bleepHttp = OkHttpClient()
     }
 
