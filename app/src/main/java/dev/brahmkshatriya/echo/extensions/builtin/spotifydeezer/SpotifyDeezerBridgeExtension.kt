@@ -3,8 +3,8 @@ package dev.brahmkshatriya.echo.extensions.builtin.spotifydeezer
 import dev.brahmkshatriya.echo.common.MusicExtension
 import dev.brahmkshatriya.echo.common.clients.*
 import dev.brahmkshatriya.echo.common.models.*
-import dev.brahmkshatriya.echo.common.models.Feed.Companion.loadAll
 import dev.brahmkshatriya.echo.common.models.Feed.Companion.toFeedData
+import dev.brahmkshatriya.echo.common.models.ImageHolder.Companion.toImageHolder
 import dev.brahmkshatriya.echo.common.providers.MusicExtensionsProvider
 import dev.brahmkshatriya.echo.common.helpers.ContinuationCallback.Companion.await
 import dev.brahmkshatriya.echo.common.helpers.PagedData
@@ -12,10 +12,8 @@ import dev.brahmkshatriya.echo.common.settings.Setting
 import dev.brahmkshatriya.echo.common.settings.Settings
 import dev.brahmkshatriya.echo.extension.DeezerExtension
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.supervisorScope
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -64,6 +62,8 @@ class SpotifyDeezerBridgeExtension :
 
     override val requiredMusicExtensions = listOf("spotify", "deezer")
     private var extensions: List<MusicExtension> = emptyList()
+    private val bleepFeedMutex = Mutex()
+    private var cachedBleepReleases: List<BleepRelease>? = null
 
     override fun setMusicExtensions(extensions: List<MusicExtension>) {
         this.extensions = extensions
@@ -87,7 +87,7 @@ class SpotifyDeezerBridgeExtension :
         return Feed(spotifyFeed.tabs) { tab ->
             val spotifyData = spotifyFeed.getPagedData(tab)
             val bleepShelf = if (tab == null || tab == spotifyFeed.notSortTabs.firstOrNull()) {
-                runCatching { withTimeoutOrNull(8_000) { buildBleepShelf() } }
+                runCatching { buildBleepShelf() }
                     .onFailure { println("BHUT Bleep: ${it.message}") }
                     .getOrNull()
             } else null
@@ -100,15 +100,32 @@ class SpotifyDeezerBridgeExtension :
         }
     }
 
-    private data class BleepRelease(val artist: String, val title: String)
+    private data class BleepRelease(
+        val artist: String,
+        val title: String,
+        val spotifyId: String,
+        val cover: String?,
+    )
 
     private suspend fun buildBleepShelf(): Shelf.Lists.Items? {
         val releases = fetchBleepWeeklyReleases()
         if (releases.isEmpty()) return null
-        val albums = supervisorScope {
-            releases.take(4).map { release ->
-                async { runCatching { resolveSpotifyAlbum(release) }.getOrNull() }
-            }.awaitAll().filterNotNull()
+        val albums = releases.map { release ->
+            Album(
+                id = "spotify:album:${release.spotifyId}",
+                title = release.title,
+                cover = release.cover?.takeIf { it.isNotBlank() }?.toImageHolder(),
+                artists = listOf(
+                    Artist(
+                        id = "bleep:${norm(release.artist)}",
+                        name = release.artist,
+                        isRadioSupported = false,
+                        isFollowable = false,
+                        isSaveable = false,
+                        isShareable = false,
+                    ),
+                ),
+            )
         }
         if (albums.isEmpty()) return null
         return Shelf.Lists.Items(
@@ -120,53 +137,34 @@ class SpotifyDeezerBridgeExtension :
     }
 
     private suspend fun fetchBleepWeeklyReleases(): List<BleepRelease> {
-        val request = Request.Builder()
-            .url("$BLEEP_FEED_URL?ts=${System.currentTimeMillis()}")
-            .header("User-Agent", "BHUT/12")
-            .header("Cache-Control", "no-cache")
-            .build()
-        val json = bleepHttp.newCall(request).await().use { response ->
-            if (!response.isSuccessful) error("Bleep feed HTTP ${response.code}")
-            response.body.string()
-        }
-        val items = JSONObject(json).optJSONArray("releases") ?: return emptyList()
-        return buildList {
-            for (i in 0 until items.length()) {
-                val item = items.optJSONObject(i) ?: continue
-                val artist = item.optString("artist").trim()
-                val title = item.optString("title").trim()
-                if (artist.isNotBlank() && title.isNotBlank()) add(BleepRelease(artist, title))
+        return bleepFeedMutex.withLock {
+            cachedBleepReleases?.let { return@withLock it }
+            val request = Request.Builder()
+                .url(BLEEP_FEED_URL)
+                .header("User-Agent", "BHUT/12")
+                .build()
+            val json = bleepHttp.newCall(request).await().use { response ->
+                if (!response.isSuccessful) error("Bleep feed HTTP ${response.code}")
+                response.body.string()
             }
-        }
-            .distinctBy { norm(it.artist) + "|" + norm(it.title) }
-            .take(12)
-    }
-
-    private suspend fun resolveSpotifyAlbum(release: BleepRelease): Album? {
-        val query = "${release.artist} ${release.title}"
-        val shelves = runCatching { client<SearchFeedClient>("spotify").loadSearchFeed(query).loadAll() }
-            .getOrDefault(emptyList())
-        val albums = shelves.flatMap { shelf ->
-            when (shelf) {
-                is Shelf.Item -> listOfNotNull(shelf.media as? Album)
-                is Shelf.Lists.Items -> shelf.list.filterIsInstance<Album>()
-                else -> emptyList()
+            val items = JSONObject(json).optJSONArray("releases")
+            val releases = buildList {
+                if (items == null) return@buildList
+                for (i in 0 until items.length()) {
+                    val item = items.optJSONObject(i) ?: continue
+                    val artist = item.optString("artist").trim()
+                    val title = item.optString("title").trim()
+                    val spotifyId = item.optString("spotifyId").trim()
+                    val cover = item.optString("cover").trim().takeIf { it.isNotBlank() }
+                    if (artist.isNotBlank() && title.isNotBlank() && spotifyId.isNotBlank()) {
+                        add(BleepRelease(artist, title, spotifyId, cover))
+                    }
+                }
             }
-        }
-        return albums.maxByOrNull { album ->
-            var score = 0
-            val wantedTitle = norm(release.title)
-            val candidateTitle = norm(album.title)
-            if (candidateTitle == wantedTitle) score += 40
-            else if (candidateTitle.contains(wantedTitle) || wantedTitle.contains(candidateTitle)) score += 20
-            val wantedArtist = norm(release.artist)
-            val candidateArtists = album.artists.map { norm(it.name) }
-            if (candidateArtists.any { it == wantedArtist }) score += 35
-            else if (candidateArtists.any { it.contains(wantedArtist) || wantedArtist.contains(it) }) score += 15
-            score
-        }?.takeIf { album ->
-            norm(album.title) == norm(release.title) ||
-                album.artists.any { norm(it.name) == norm(release.artist) }
+                .distinctBy { norm(it.artist) + "|" + norm(it.title) }
+                .take(12)
+            cachedBleepReleases = releases
+            releases
         }
     }
 

@@ -63,18 +63,47 @@ try {
 
   const unique = [...new Map(
     releases.map((item) => [`${item.artist.toLowerCase()}|${item.title.toLowerCase()}`, item]),
-  ).values()].slice(0, 12);
+  ).values()].slice(0, 4);
   if (!unique.length) {
     console.error("Bleep section preview:", lines.slice(start, Math.min(start + 80, end)).join(" | "));
     throw new Error("Bleep page produced no releases; keeping the last good feed");
   }
 
+  const spotifyPage = await context.newPage();
+  const resolved = [];
+  for (const release of unique) {
+    const query = encodeURIComponent(`${release.artist} ${release.title}`);
+    try {
+      await spotifyPage.goto(`https://open.spotify.com/search/${query}/albums`, {
+        waitUntil: "domcontentloaded",
+        timeout: 60_000,
+      });
+      const albumLink = spotifyPage.locator('a[href*="/album/"]').first();
+      await albumLink.waitFor({ state: "attached", timeout: 30_000 });
+      const href = await albumLink.getAttribute("href");
+      const spotifyId = href?.match(/\/album\/([^/?]+)/)?.[1];
+      if (!spotifyId) throw new Error("Spotify returned no album ID");
+
+      await spotifyPage.goto(`https://open.spotify.com/album/${spotifyId}`, {
+        waitUntil: "domcontentloaded",
+        timeout: 60_000,
+      });
+      const cover = await spotifyPage.locator('meta[property="og:image"]').getAttribute("content");
+      resolved.push({ ...release, spotifyId, cover: cover || null });
+      console.log(`Resolved ${release.artist} — ${release.title} to ${spotifyId}`);
+    } catch (error) {
+      console.warn(`Skipped ${release.artist} — ${release.title}: ${error.message}`);
+    }
+  }
+  await spotifyPage.close();
+  if (!resolved.length) throw new Error("Spotify produced no verified album IDs; keeping the last good feed");
+
   await mkdir("data", { recursive: true });
   await writeFile(
     "data/bleep-weekly.json",
-    `${JSON.stringify({ updatedAt: new Date().toISOString(), source, releases: unique }, null, 2)}\n`,
+    `${JSON.stringify({ updatedAt: new Date().toISOString(), source, releases: resolved }, null, 2)}\n`,
   );
-  console.log(`Saved ${unique.length} Bleep releases`);
+  console.log(`Saved ${resolved.length} verified Bleep releases`);
 } finally {
   await browser.close();
 }
