@@ -119,8 +119,8 @@ class SpotifyDeezerBridgeExtension :
             response.body.string()
         }
         val text = html
-            .replace(Regex("<script[\s\S]*?</script>", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("<style[\s\S]*?</style>", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("""<script[\s\S]*?</script>""", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("""<style[\s\S]*?</style>""", RegexOption.IGNORE_CASE), " ")
             .replace(Regex("<[^>]+>"), "\n")
             .replace("&amp;", "&")
             .replace("&quot;", "\"")
