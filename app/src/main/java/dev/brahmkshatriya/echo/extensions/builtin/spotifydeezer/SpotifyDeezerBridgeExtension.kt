@@ -15,6 +15,7 @@ import dev.brahmkshatriya.echo.extension.DeezerExtension
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -46,7 +47,7 @@ class SpotifyDeezerBridgeExtension :
             type = ExtensionType.MUSIC,
             id = ID,
             name = "Spotify → Deezer MP3",
-            version = "v12",
+            version = "v13",
             description = "Spotify browsing and library with Deezer MP3 playback, Deezer radio, and Bleep weekly releases.",
             author = "BHUT",
             isEnabled = true,
@@ -87,11 +88,7 @@ class SpotifyDeezerBridgeExtension :
         val spotifyFeed = client<HomeFeedClient>("spotify").loadHomeFeed()
         return Feed(spotifyFeed.tabs) { tab ->
             val spotifyData = spotifyFeed.getPagedData(tab)
-            val bleepShelf = if (tab == null || tab == spotifyFeed.notSortTabs.firstOrNull()) {
-                runCatching { buildBleepShelf() }
-                    .onFailure { println("BHUT Bleep: ${it.message}") }
-                    .getOrNull()
-            } else null
+            val bleepShelf = buildBleepShelf()
             spotifyData.copy(
                 pagedData = PagedData.Concat(
                     PagedData.Single { listOfNotNull(bleepShelf) },
@@ -109,8 +106,11 @@ class SpotifyDeezerBridgeExtension :
     )
 
     private suspend fun buildBleepShelf(): Shelf.Lists.Items? {
-        val releases = fetchBleepWeeklyReleases()
-        if (releases.isEmpty()) return null
+        val releases = runCatching { withTimeoutOrNull(5_000) { fetchBleepWeeklyReleases() } }
+            .onFailure { println("BHUT Bleep live feed: ${it.message}; using V13 fallback") }
+            .getOrNull()
+            .orEmpty()
+            .ifEmpty { fallbackBleepReleases() }
         val albums = releases.map { release ->
             Album(
                 id = "spotify:album:${release.spotifyId}",
@@ -131,7 +131,7 @@ class SpotifyDeezerBridgeExtension :
         if (albums.isEmpty()) return null
         return Shelf.Lists.Items(
             id = "bhut-bleep-weekly",
-            title = "Bleep — Releases of the Week",
+            title = "Bleep Weekly • V13",
             list = albums,
             subtitle = "Release of the Week + Featured Releases",
         )
@@ -142,7 +142,7 @@ class SpotifyDeezerBridgeExtension :
             cachedBleepReleases?.let { return@withLock it }
             val request = Request.Builder()
                 .url(BLEEP_FEED_URL)
-                .header("User-Agent", "BHUT/12")
+                .header("User-Agent", "BHUT/13")
                 .build()
             val json = bleepHttp.newCall(request).await().use { response ->
                 if (!response.isSuccessful) error("Bleep feed HTTP ${response.code}")
@@ -168,6 +168,13 @@ class SpotifyDeezerBridgeExtension :
             releases
         }
     }
+
+    private fun fallbackBleepReleases() = listOf(
+        BleepRelease("Topdown Dialectic", "False LP A", "1R570SkqASVYyKJJQAzV5v", null),
+        BleepRelease("cv313", "Echospace [Detroit] Presents: Altering Illusions", "1tFPG5LFOIK3Vdl4w1Ld1u", null),
+        BleepRelease("Mos Def", "The Ecstatic", "5Oa2WgO3Jfuw2IKYrZNzTi", null),
+        BleepRelease("Phoebe Bridgers", "Lost Weekend", "2NSzwyYvQvdOQAoEjrlw9c", null),
+    )
 
     override suspend fun loadSearchFeed(query: String): Feed<Shelf> =
         client<SearchFeedClient>("spotify").loadSearchFeed(query)
