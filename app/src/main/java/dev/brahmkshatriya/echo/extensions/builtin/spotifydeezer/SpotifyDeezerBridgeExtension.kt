@@ -49,7 +49,7 @@ class SpotifyDeezerBridgeExtension :
             type = ExtensionType.MUSIC,
             id = ID,
             name = "Spotify → Deezer MP3",
-            version = "v16",
+            version = "v17",
             description = "Spotify browsing with Deezer MP3 playback, Bleep picks, and the latest NTS archives.",
             author = "BHUT",
             isEnabled = true,
@@ -117,7 +117,7 @@ class SpotifyDeezerBridgeExtension :
 
     private suspend fun buildBleepShelf(): Shelf.Lists.Items? {
         val releases = runCatching { withTimeoutOrNull(5_000) { fetchBleepWeeklyReleases() } }
-            .onFailure { println("BHUT Bleep live feed: ${it.message}; using V16 fallback") }
+            .onFailure { println("BHUT Bleep live feed: ${it.message}; using V17 fallback") }
             .getOrNull()
             .orEmpty()
             .ifEmpty { fallbackBleepReleases() }
@@ -141,7 +141,7 @@ class SpotifyDeezerBridgeExtension :
         if (albums.isEmpty()) return null
         return Shelf.Lists.Items(
             id = "bhut-bleep-weekly",
-            title = "Bleep Weekly • V16",
+            title = "Bleep Weekly • V17",
             list = albums,
             subtitle = "Record of the Month + weekly and featured picks",
         )
@@ -189,7 +189,7 @@ class SpotifyDeezerBridgeExtension :
         if (episodes.isEmpty()) return null
         return Shelf.Lists.Items(
             id = "bhut-nts-latest",
-            title = "NTS Latest Archives • V16",
+            title = "NTS Latest Archives • V17",
             list = episodes,
             subtitle = "Newest playable mixes from the NTS archive",
         )

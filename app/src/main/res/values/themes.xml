@@ -5,7 +5,7 @@
             @color/amoled_bg
         </item>
         <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="s">
-            @drawable/bhut_makara
+            @drawable/bhut_makara_splash
         </item>
         <item name="android:windowSplashScreenAnimationDuration" tools:targetApi="s">0</item>
         <item name="android:windowSplashScreenIconBackgroundColor" tools:targetApi="s">@android:color/transparent</item>
