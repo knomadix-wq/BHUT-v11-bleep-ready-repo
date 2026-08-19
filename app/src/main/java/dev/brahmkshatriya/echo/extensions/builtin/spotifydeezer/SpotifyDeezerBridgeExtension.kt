@@ -49,8 +49,8 @@ class SpotifyDeezerBridgeExtension :
             type = ExtensionType.MUSIC,
             id = ID,
             name = "Spotify → Deezer MP3",
-            version = "v20",
-            description = "Spotify browsing with Deezer MP3 playback, curated Bleep and Boomkat picks, and the latest NTS archives.",
+            version = "v21",
+            description = "Spotify browsing with Deezer MP3 playback, curated Bleep, Boomkat and Bandcamp Daily picks, and the latest NTS archives.",
             author = "BHUT",
             isEnabled = true,
         )
@@ -66,6 +66,8 @@ class SpotifyDeezerBridgeExtension :
             "https://raw.githubusercontent.com/knomadix-wq/BHUT-v12-bleep-ready-repo/main/data/bleep-weekly.json"
         private const val BOOMKAT_FEED_URL =
             "https://raw.githubusercontent.com/knomadix-wq/BHUT-v12-bleep-ready-repo/main/data/boomkat-weekly.json"
+        private const val BANDCAMP_FEED_URL =
+            "https://raw.githubusercontent.com/knomadix-wq/BHUT-v12-bleep-ready-repo/main/data/bandcamp-electronic.json"
         private val bleepHttp = OkHttpClient()
     }
 
@@ -74,6 +76,7 @@ class SpotifyDeezerBridgeExtension :
     private val bleepFeedMutex = Mutex()
     private var cachedBleepReleases: List<BleepRelease>? = null
     private var cachedBoomkatReleases: List<BleepRelease>? = null
+    private var cachedBandcampReleases: List<BleepRelease>? = null
     private val ntsFeedMutex = Mutex()
     private var cachedNtsEpisodes: List<Track>? = null
 
@@ -100,7 +103,7 @@ class SpotifyDeezerBridgeExtension :
             val spotifyData = spotifyFeed.getPagedData(tab)
             val filteredSpotifyData = spotifyData.copy(
                 pagedData = spotifyData.pagedData.map { result ->
-                    result.getOrThrow().filter(::keepSpotifyHomeShelf)
+                    result.getOrThrow().mapNotNull(::withoutSpotifyRadio)
                 },
             )
             val curatedShelf = buildCuratedShelf()
@@ -116,13 +119,11 @@ class SpotifyDeezerBridgeExtension :
         }
     }
 
-    private fun keepSpotifyHomeShelf(shelf: Shelf): Boolean {
-        val title = norm(shelf.title)
-        val id = norm(shelf.id)
-        val isGreeting = listOf("good morning", "good afternoon", "good evening")
-            .any(title::startsWith)
-        val isReleaseRadar = title.contains("release radar") || id.contains("release radar")
-        return isGreeting || isReleaseRadar
+    private fun withoutSpotifyRadio(shelf: Shelf): Shelf? = when (shelf) {
+        is Shelf.Item -> shelf.takeUnless { it.media is Radio }
+        is Shelf.Lists.Items -> shelf.copy(list = shelf.list.filterNot { it is Radio })
+            .takeIf { it.list.isNotEmpty() }
+        else -> shelf
     }
 
     private data class BleepRelease(
@@ -135,16 +136,21 @@ class SpotifyDeezerBridgeExtension :
 
     private suspend fun buildCuratedShelf(): Shelf.Lists.Items? {
         val bleep = runCatching { withTimeoutOrNull(5_000) { fetchBleepWeeklyReleases() } }
-            .onFailure { println("BHUT Bleep live feed: ${it.message}; using V20 fallback") }
+            .onFailure { println("BHUT Bleep live feed: ${it.message}; using V21 fallback") }
             .getOrNull()
             .orEmpty()
             .ifEmpty { fallbackBleepReleases() }
         val boomkat = runCatching { withTimeoutOrNull(5_000) { fetchBoomkatWeeklyReleases() } }
-            .onFailure { println("BHUT Boomkat feed: ${it.message}; using V20 fallback") }
+            .onFailure { println("BHUT Boomkat feed: ${it.message}; using V21 fallback") }
             .getOrNull()
             .orEmpty()
             .ifEmpty { fallbackBoomkatReleases() }
-        val releases = (bleep + boomkat).fold(linkedMapOf<String, BleepRelease>()) { merged, release ->
+        val bandcamp = runCatching { withTimeoutOrNull(5_000) { fetchBandcampReleases() } }
+            .onFailure { println("BHUT Bandcamp Daily feed: ${it.message}; using V21 fallback") }
+            .getOrNull()
+            .orEmpty()
+            .ifEmpty { fallbackBandcampReleases() }
+        val releases = (bleep + boomkat + bandcamp).fold(linkedMapOf<String, BleepRelease>()) { merged, release ->
             val key = release.spotifyId.ifBlank { norm(release.artist) + "|" + norm(release.title) }
             val existing = merged[key]
             merged[key] = existing?.copy(sources = existing.sources + release.sources) ?: release
@@ -171,9 +177,9 @@ class SpotifyDeezerBridgeExtension :
         if (albums.isEmpty()) return null
         return Shelf.Lists.Items(
             id = "bhut-curated-weekly",
-            title = "CURATED • V20",
+            title = "CURATED • V21",
             list = albums,
-            subtitle = "Weekly picks from Bleep and Boomkat",
+            subtitle = "Picks from Bleep, Boomkat and Bandcamp Daily",
         )
     }
 
@@ -212,7 +218,7 @@ class SpotifyDeezerBridgeExtension :
     private suspend fun fetchBoomkatWeeklyReleases(): List<BleepRelease> = bleepFeedMutex.withLock {
         cachedBoomkatReleases?.let { return@withLock it }
         val json = bleepHttp.newCall(
-            Request.Builder().url(BOOMKAT_FEED_URL).header("User-Agent", "BHUT/20").build()
+            Request.Builder().url(BOOMKAT_FEED_URL).header("User-Agent", "BHUT/21").build()
         ).await().use { response ->
             if (!response.isSuccessful) error("Boomkat feed HTTP ${response.code}")
             response.body.string()
@@ -232,6 +238,32 @@ class SpotifyDeezerBridgeExtension :
             }
         }.distinctBy { it.spotifyId }.take(12)
         cachedBoomkatReleases = releases
+        releases
+    }
+
+    private suspend fun fetchBandcampReleases(): List<BleepRelease> = bleepFeedMutex.withLock {
+        cachedBandcampReleases?.let { return@withLock it }
+        val json = bleepHttp.newCall(
+            Request.Builder().url(BANDCAMP_FEED_URL).header("User-Agent", "BHUT/21").build()
+        ).await().use { response ->
+            if (!response.isSuccessful) error("Bandcamp feed HTTP ${response.code}")
+            response.body.string()
+        }
+        val items = JSONObject(json).optJSONArray("releases")
+        val releases = buildList {
+            if (items == null) return@buildList
+            for (i in 0 until items.length()) {
+                val item = items.optJSONObject(i) ?: continue
+                val artist = item.optString("artist").trim()
+                val title = item.optString("title").trim()
+                val spotifyId = item.optString("spotifyId").trim()
+                val cover = item.optString("cover").trim().takeIf(String::isNotBlank)
+                if (artist.isNotBlank() && title.isNotBlank() && spotifyId.isNotBlank()) {
+                    add(BleepRelease(artist, title, spotifyId, cover, setOf("BANDCAMP DAILY")))
+                }
+            }
+        }.distinctBy { it.spotifyId }.take(12)
+        cachedBandcampReleases = releases
         releases
     }
 
@@ -278,12 +310,36 @@ class SpotifyDeezerBridgeExtension :
         ),
     )
 
+    private fun fallbackBandcampReleases() = listOf(
+        BleepRelease(
+            "The Bug / Dis Fig",
+            "Ladybug 1",
+            "0U171DRtrbqXZONDIPd14F",
+            "https://i.scdn.co/image/ab67616d00004851842a568d786d43452824045d",
+            setOf("BANDCAMP DAILY"),
+        ),
+        BleepRelease(
+            "HVL",
+            "Formation",
+            "70S5dpPzjDZJ6WzftyGjL4",
+            "https://i.scdn.co/image/ab67616d00004851b26169b6c04dba0024ffd5ba",
+            setOf("BANDCAMP DAILY"),
+        ),
+        BleepRelease(
+            "ReKab",
+            "Subtle Beginnings",
+            "6Pc0xUcMdQHcITAGRWYyRy",
+            "https://i.scdn.co/image/ab67616d00004851658bcb57cf188a6065057957",
+            setOf("BANDCAMP DAILY"),
+        ),
+    )
+
     private suspend fun buildNtsShelf(): Shelf.Lists.Items? {
         val episodes = fetchNtsEpisodes()
         if (episodes.isEmpty()) return null
         return Shelf.Lists.Items(
             id = "bhut-nts-latest",
-            title = "NTS Latest Archives • V20",
+            title = "NTS Latest Archives • V21",
             list = episodes,
             subtitle = "Newest playable mixes from the NTS archive",
         )
