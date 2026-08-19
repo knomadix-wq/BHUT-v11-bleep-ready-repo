@@ -334,9 +334,10 @@ class MediaHeaderAdapter(
                         if (item is Album) appendLine()
                         appendLine(madeBy)
                     }
-                    if (item.label != null) {
+                    val visibleLabel = item.label?.deduplicatedAlbumLabel(item.artists.map { it.name })
+                    if (!visibleLabel.isNullOrEmpty()) {
                         appendLine()
-                        appendLine(item.label)
+                        appendLine(visibleLabel)
                     }
                 }.trimEnd('\n').trimStart('\n'))
                 val madeByIndex = span.indexOf(madeBy)
@@ -432,6 +433,42 @@ class MediaHeaderAdapter(
         ) = runCatching {
             resources.getQuantityString(numberStringId, count, count)
         }.getOrNull() ?: getString(nStringId, count)
+
+        /**
+         * Spotify often repeats a self-releasing artist as the album label, or returns the
+         * same label/copyright fragment twice. Clean only the rendered header text; retain
+         * the source metadata for matching and playback.
+         */
+        internal fun String.deduplicatedAlbumLabel(artistNames: List<String>): String? {
+            fun comparable(value: String) = value
+                .lowercase()
+                .replace(Regex("[©℗]"), "")
+                .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+                .trim()
+
+            fun collapseRepeatedHalf(value: String): String {
+                val words = value.trim().split(Regex("\\s+")).filter(String::isNotEmpty)
+                if (words.size < 2 || words.size % 2 != 0) return value.trim()
+                val half = words.size / 2
+                return if (words.take(half).map(::comparable) == words.drop(half).map(::comparable)) {
+                    words.take(half).joinToString(" ")
+                } else value.trim()
+            }
+
+            val artists = artistNames.map(::comparable).filter(String::isNotBlank).toSet()
+            return lineSequence()
+                .flatMap { it.split(Regex("\\s*[|;•]\\s*")).asSequence() }
+                .map(::collapseRepeatedHalf)
+                .filter(String::isNotBlank)
+                .distinctBy(::comparable)
+                .filterNot { part ->
+                    val normalized = comparable(part)
+                    normalized in artists ||
+                        normalized.replace(Regex("^(?:19|20)\\d{2}\\s+"), "") in artists
+                }
+                .joinToString("\n")
+                .ifBlank { null }
+        }
 
         fun Fragment.getMediaHeaderListener(viewModel: MediaDetailsViewModel) = object : Listener {
             override fun onRetry(view: View) {

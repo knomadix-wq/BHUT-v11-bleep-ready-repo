@@ -207,6 +207,20 @@ fun Item.Playlist.toRadio(cropCovers: Boolean): Radio? {
 }
 
 fun IAlbum.toAlbum(cropCovers: Boolean, n: String? = null): Album? {
+    val artistNames = artists?.items.orEmpty().mapNotNull { it.profile?.name }
+    val descriptionLines = sequence {
+        if (!courtesyLine.isNullOrBlank()) yield(courtesyLine)
+        copyright?.items?.forEach { yield(it.text) }
+    }
+        .mapNotNull { it?.trim() }
+        .filter(String::isNotEmpty)
+        .distinctBy(String::albumMetadataKey)
+        .filterNot { line ->
+            val key = line.albumMetadataKey()
+            key == label?.albumMetadataKey() || artistNames.any { it.albumMetadataKey() == key }
+        }
+        .toList()
+
     return Album(
         id = uri ?: return null,
         title = name ?: n ?: return null,
@@ -216,15 +230,16 @@ fun IAlbum.toAlbum(cropCovers: Boolean, n: String? = null): Album? {
         trackCount = tracksV2?.totalCount,
         duration = tracksV2?.toDuration(),
         releaseDate = date?.toDate(),
-        description = buildString {
-            if (!courtesyLine.isNullOrBlank()) appendLine(courtesyLine)
-            copyright?.items?.forEach {
-                appendLine(it.text)
-            }
-        },
+        description = descriptionLines.joinToString("\n").ifBlank { null },
         label = label
     )
 }
+
+private fun String.albumMetadataKey(): String = lowercase()
+    .replace(Regex("[©℗]"), "")
+    .replace(Regex("^(?:19|20)\\d{2}\\s+"), "")
+    .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+    .trim()
 
 fun TracksV2.toDuration(): Long? {
     val average = items?.run {
