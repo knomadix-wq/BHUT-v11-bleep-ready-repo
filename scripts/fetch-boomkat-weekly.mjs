@@ -45,6 +45,24 @@ try {
     const title = lines[i + 2] || "";
     if (artist && title) releases.push({ artist, title, section: lines[i] });
   }
+
+  const recommended = await page.evaluate(() => {
+    const heading = [...document.querySelectorAll("h1, h2, h3, h4, div, span")]
+      .find((element) => element.textContent?.trim() === "Recommended New Releases");
+    if (!heading) return [];
+    const all = [...document.querySelectorAll('a[href*="/products/"]')];
+    return all.filter((anchor) =>
+      Boolean(heading.compareDocumentPosition(anchor) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ).map((anchor) => {
+      let container = anchor;
+      while (container.parentElement && container.parentElement.innerText.trim().split(/\n+/).length < 2) {
+        container = container.parentElement;
+      }
+      const parts = container.innerText.split(/\n+/).map((part) => part.trim()).filter(Boolean);
+      return { artist: parts[0] || "", title: parts[1] || "", section: "Recommended New Releases" };
+    });
+  });
+  releases.push(...recommended.filter(({ artist, title }) => artist && title));
   const unique = [...new Map(
     releases.map((item) => [`${normalise(item.artist)}|${normalise(item.title)}`, item]),
   ).values()].slice(0, 12);

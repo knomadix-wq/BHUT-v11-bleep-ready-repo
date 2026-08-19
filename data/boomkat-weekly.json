@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-19T00:00:00.000Z",
+  "updatedAt": "2026-08-19T02:00:00.000Z",
   "source": "https://boomkat.com/weekly-roundup",
   "releases": [
     {
@@ -7,7 +7,35 @@
       "title": "Swerved",
       "section": "Single of the week",
       "spotifyId": "2sFUiugQ90JwZhOkJIrZiP",
-      "cover": "https://i.scdn.co/image/ab67616d00004851f335151666ed660f1a711be8"
+      "cover": "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e02f335151666ed660f1a711be8"
+    },
+    {
+      "artist": "Cate Kennan",
+      "title": "Shadows",
+      "section": "Recommended New Releases",
+      "spotifyId": "5QjofTmQcJeoTeGCTavLtb",
+      "cover": "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e02a181b0590223934290e3fe4a"
+    },
+    {
+      "artist": "Charanjit Singh",
+      "title": "Synthesizing - Ten Ragas to a Disco Beat",
+      "section": "Recommended New Releases",
+      "spotifyId": "1xXm4sanFkm9tVZglqTq60",
+      "cover": "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e027443f8328a2f0d3f3141bef5"
+    },
+    {
+      "artist": "YL Hooi",
+      "title": "Untitled",
+      "section": "Recommended New Releases",
+      "spotifyId": "1aVKHYdh9Qqv0lKulUturf",
+      "cover": "https://image-cdn-fa.spotifycdn.com/image/ab67616d00001e02550205050f35b877cdb525c2"
+    },
+    {
+      "artist": "Nondi_",
+      "title": "Nondi...",
+      "section": "Recommended New Releases",
+      "spotifyId": "5gTVBk1Ny9S6Ki5cCkyOz2",
+      "cover": "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e02bb8a389e22e85014278629e6"
     }
   ]
 }
