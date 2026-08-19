@@ -1,4 +1,4 @@
-name: Update Bleep weekly feed
+name: Update curated weekly feeds
 
 on:
   workflow_dispatch:
@@ -7,6 +7,7 @@ on:
     paths:
       - ".github/workflows/update-bleep-feed.yml"
       - "scripts/fetch-bleep-weekly.mjs"
+      - "scripts/fetch-boomkat-weekly.mjs"
   schedule:
     - cron: "17 9 * * 5"
 
@@ -28,14 +29,17 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Fetch Bleep roundup
         run: node scripts/fetch-bleep-weekly.mjs
+      - name: Fetch Boomkat roundup
+        run: node scripts/fetch-boomkat-weekly.mjs
+        continue-on-error: true
       - name: Commit updated feed
         run: |
-          if git diff --quiet -- data/bleep-weekly.json; then
+          if git diff --quiet -- data/bleep-weekly.json data/boomkat-weekly.json; then
             echo "Feed is unchanged"
             exit 0
           fi
           git config user.name "BHUT Feed Bot"
           git config user.email "actions@users.noreply.github.com"
-          git add data/bleep-weekly.json
-          git commit -m "Update Bleep weekly feed"
+          git add data/bleep-weekly.json data/boomkat-weekly.json
+          git commit -m "Update curated weekly feeds"
           git push
