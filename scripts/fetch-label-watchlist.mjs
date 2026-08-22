@@ -39,14 +39,15 @@ try {
   for (const label of labels) {
     await cataloguePage.goto(label.url, { waitUntil: "domcontentloaded", timeout: 90_000 });
     const releases = await cataloguePage.locator(".music-grid-item").evaluateAll((items) =>
-      items.slice(0, 1).map((item) => ({
+      items.slice(0, 8).map((item) => ({
         title: item.querySelector(".title")?.textContent?.trim() || "",
         artist: item.querySelector(".artist-override")?.textContent?.replace(/^by\s+/i, "").trim() || "",
         url: item.querySelector('a[href*="/album/"]')?.href || "",
       })).filter((item) => item.title && item.artist && item.url),
     );
-    candidates.push(...releases
-      .filter((release) => !knownUrls.has(release.url))
+    const firstKnown = releases.findIndex((release) => knownUrls.has(release.url));
+    const unseen = firstKnown < 0 ? releases : releases.slice(0, firstKnown);
+    candidates.push(...unseen
       .map((release) => ({ ...release, source: label.name })));
   }
 
@@ -56,6 +57,7 @@ try {
   const spotifyPage = await context.newPage();
   const resolved = [];
   for (const release of unique) {
+    if (resolved.some((item) => item.source === release.source)) continue;
     try {
       const query = encodeURIComponent(`${release.artist} ${release.title}`);
       await spotifyPage.goto(`https://open.spotify.com/search/${query}/albums`, {

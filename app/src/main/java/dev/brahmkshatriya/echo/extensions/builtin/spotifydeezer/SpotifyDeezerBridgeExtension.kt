@@ -52,7 +52,7 @@ class SpotifyDeezerBridgeExtension :
             type = ExtensionType.MUSIC,
             id = ID,
             name = "Spotify → Deezer MP3",
-            version = "v25",
+            version = "v26",
             description = "Spotify browsing with Deezer MP3 playback, curated editorial and experimental-label picks, and the latest NTS archives.",
             author = "BHUT",
             isEnabled = true,
@@ -108,13 +108,6 @@ class SpotifyDeezerBridgeExtension :
         val spotifyFeed = client<HomeFeedClient>("spotify").loadHomeFeed()
         return Feed(spotifyFeed.tabs) { tab ->
             val spotifyData = spotifyFeed.getPagedData(tab)
-            val filteredSpotifyData = spotifyData.copy(
-                pagedData = spotifyData.pagedData.map { result ->
-                    result.getOrThrow()
-                        .filterNot(::removeSpotifyHomeShelf)
-                        .mapNotNull(::withoutSpotifyRadio)
-                },
-            )
             val curatedShelf = buildCuratedShelf()
             val localShelf = runCatching { withTimeoutOrNull(8_000) { buildAustralianLocalShelf() } }
                 .onFailure { println("BHUT Australian local releases: ${it.message}") }
@@ -122,11 +115,29 @@ class SpotifyDeezerBridgeExtension :
             val ntsShelf = runCatching { withTimeoutOrNull(8_000) { buildNtsShelf() } }
                 .onFailure { println("BHUT NTS: ${it.message}") }
                 .getOrNull()
-            filteredSpotifyData.copy(
-                pagedData = PagedData.Concat(
-                    PagedData.Single { listOfNotNull(ntsShelf, curatedShelf, localShelf) },
-                    filteredSpotifyData.pagedData,
-                ),
+            spotifyData.copy(
+                pagedData = PagedData.Single {
+                    val spotifyShelves = spotifyData.pagedData.loadAll()
+                        .filterNot(::removeSpotifyHomeShelf)
+                        .mapNotNull(::withoutSpotifyRadio)
+                    val (releaseRadar, withoutRadar) = takeStandaloneShelf(
+                        spotifyShelves, "release radar", "RELEASE RADAR",
+                    )
+                    val (newReleases, withoutNewReleases) = takeStandaloneShelf(
+                        withoutRadar, "new releases for you", "NEW RELEASES FOR YOU",
+                    )
+                    val (recommendedToday, remaining) = takeStandaloneShelf(
+                        withoutNewReleases, "recommended for today", "Recommended for today",
+                    )
+                    listOfNotNull(
+                        ntsShelf,
+                        curatedShelf,
+                        releaseRadar,
+                        newReleases,
+                        recommendedToday,
+                        localShelf,
+                    ) + remaining
+                },
             )
         }
     }
@@ -135,7 +146,51 @@ class SpotifyDeezerBridgeExtension :
         val title = norm(shelf.title)
         return title.startsWith("made for ") ||
             title == "best of artists" ||
-            title == "your top mixes"
+            title == "your top mixes" ||
+            title == "your favourite artists" ||
+            title == "your favorite artists" ||
+            title.startsWith("more like ")
+    }
+
+    private fun takeStandaloneShelf(
+        shelves: List<Shelf>,
+        target: String,
+        displayTitle: String,
+    ): Pair<Shelf?, List<Shelf>> {
+        var selected: Shelf? = null
+        val remaining = buildList {
+            shelves.forEach { shelf ->
+                if (norm(shelf.title) == target) {
+                    if (selected == null) selected = shelf
+                    return@forEach
+                }
+                when (shelf) {
+                    is Shelf.Item -> {
+                        if (norm(shelf.media.title) == target && selected == null) {
+                            selected = Shelf.Lists.Items(
+                                id = "bhut-${target.replace(' ', '-')}",
+                                title = displayTitle,
+                                list = listOf(shelf.media),
+                            )
+                        } else add(shelf)
+                    }
+                    is Shelf.Lists.Items -> {
+                        val matches = shelf.list.filter { norm(it.title) == target }
+                        if (matches.isNotEmpty() && selected == null) {
+                            selected = shelf.copy(
+                                id = "bhut-${target.replace(' ', '-')}",
+                                title = displayTitle,
+                                list = matches,
+                            )
+                            val leftovers = shelf.list.filterNot { norm(it.title) == target }
+                            if (leftovers.isNotEmpty()) add(shelf.copy(list = leftovers))
+                        } else add(shelf)
+                    }
+                    else -> add(shelf)
+                }
+            }
+        }
+        return selected to remaining
     }
 
     private fun withoutSpotifyRadio(shelf: Shelf): Shelf? = when (shelf) {
@@ -181,22 +236,22 @@ class SpotifyDeezerBridgeExtension :
 
     private suspend fun buildCuratedShelf(): Shelf.Lists.Items? {
         val bleep = runCatching { withTimeoutOrNull(5_000) { fetchBleepWeeklyReleases() } }
-            .onFailure { println("BHUT Bleep live feed: ${it.message}; using V25 fallback") }
+            .onFailure { println("BHUT Bleep live feed: ${it.message}; using V26 fallback") }
             .getOrNull()
             .orEmpty()
             .ifEmpty { fallbackBleepReleases() }
         val boomkat = runCatching { withTimeoutOrNull(5_000) { fetchBoomkatWeeklyReleases() } }
-            .onFailure { println("BHUT Boomkat feed: ${it.message}; using V25 fallback") }
+            .onFailure { println("BHUT Boomkat feed: ${it.message}; using V26 fallback") }
             .getOrNull()
             .orEmpty()
             .ifEmpty { fallbackBoomkatReleases() }
         val bandcamp = runCatching { withTimeoutOrNull(5_000) { fetchBandcampReleases() } }
-            .onFailure { println("BHUT Bandcamp Daily feed: ${it.message}; using V25 fallback") }
+            .onFailure { println("BHUT Bandcamp Daily feed: ${it.message}; using V26 fallback") }
             .getOrNull()
             .orEmpty()
             .ifEmpty { fallbackBandcampReleases() }
         val labels = runCatching { withTimeoutOrNull(5_000) { fetchLabelWatchlistReleases() } }
-            .onFailure { println("BHUT label watchlist feed: ${it.message}; using V25 baseline") }
+            .onFailure { println("BHUT label watchlist feed: ${it.message}; using V26 baseline") }
             .getOrNull()
             .orEmpty()
             .ifEmpty { fallbackLabelReleases() }
@@ -227,7 +282,7 @@ class SpotifyDeezerBridgeExtension :
         if (albums.isEmpty()) return null
         return Shelf.Lists.Items(
             id = "bhut-curated-weekly",
-            title = "CURATED • V25",
+            title = "CURATED • V26",
             list = albums,
             subtitle = "Bleep · Boomkat · Bandcamp Daily · Shelter Press · Latency · Editions Mego · Raster",
         )
@@ -268,7 +323,7 @@ class SpotifyDeezerBridgeExtension :
     private suspend fun fetchBoomkatWeeklyReleases(): List<BleepRelease> = bleepFeedMutex.withLock {
         cachedBoomkatReleases?.let { return@withLock it }
         val json = bleepHttp.newCall(
-            Request.Builder().url(BOOMKAT_FEED_URL).header("User-Agent", "BHUT/25").build()
+            Request.Builder().url(BOOMKAT_FEED_URL).header("User-Agent", "BHUT/26").build()
         ).await().use { response ->
             if (!response.isSuccessful) error("Boomkat feed HTTP ${response.code}")
             response.body.string()
@@ -294,7 +349,7 @@ class SpotifyDeezerBridgeExtension :
     private suspend fun fetchBandcampReleases(): List<BleepRelease> = bleepFeedMutex.withLock {
         cachedBandcampReleases?.let { return@withLock it }
         val json = bleepHttp.newCall(
-            Request.Builder().url(BANDCAMP_FEED_URL).header("User-Agent", "BHUT/25").build()
+            Request.Builder().url(BANDCAMP_FEED_URL).header("User-Agent", "BHUT/26").build()
         ).await().use { response ->
             if (!response.isSuccessful) error("Bandcamp feed HTTP ${response.code}")
             response.body.string()
@@ -320,7 +375,7 @@ class SpotifyDeezerBridgeExtension :
     private suspend fun fetchLabelWatchlistReleases(): List<BleepRelease> = bleepFeedMutex.withLock {
         cachedLabelReleases?.let { return@withLock it }
         val json = bleepHttp.newCall(
-            Request.Builder().url(LABEL_WATCHLIST_FEED_URL).header("User-Agent", "BHUT/25").build()
+            Request.Builder().url(LABEL_WATCHLIST_FEED_URL).header("User-Agent", "BHUT/26").build()
         ).await().use { response ->
             if (!response.isSuccessful) error("Label watchlist feed HTTP ${response.code}")
             response.body.string()
@@ -426,7 +481,7 @@ class SpotifyDeezerBridgeExtension :
         if (episodes.isEmpty()) return null
         return Shelf.Lists.Items(
             id = "bhut-nts-latest",
-            title = "NTS Latest Archives • V25",
+            title = "NTS Latest Archives • V26",
             list = episodes,
             subtitle = "Newest playable mixes from the NTS archive",
         )
