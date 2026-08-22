@@ -49,7 +49,7 @@ class SpotifyDeezerBridgeExtension :
             type = ExtensionType.MUSIC,
             id = ID,
             name = "Spotify → Deezer MP3",
-            version = "v21",
+            version = "v22",
             description = "Spotify browsing with Deezer MP3 playback, curated Bleep, Boomkat and Bandcamp Daily picks, and the latest NTS archives.",
             author = "BHUT",
             isEnabled = true,
@@ -120,11 +120,14 @@ class SpotifyDeezerBridgeExtension :
     }
 
     private fun withoutSpotifyRadio(shelf: Shelf): Shelf? = when (shelf) {
-        is Shelf.Item -> shelf.takeUnless { it.media is Radio }
-        is Shelf.Lists.Items -> shelf.copy(list = shelf.list.filterNot { it is Radio })
+        is Shelf.Item -> shelf.takeUnless { isSpotifyRadioItem(it.media) }
+        is Shelf.Lists.Items -> shelf.copy(list = shelf.list.filterNot(::isSpotifyRadioItem))
             .takeIf { it.list.isNotEmpty() }
         else -> shelf
     }
+
+    private fun isSpotifyRadioItem(item: EchoMediaItem): Boolean =
+        item is Radio || (item is Playlist && norm(item.title).endsWith(" radio"))
 
     private data class BleepRelease(
         val artist: String,
@@ -136,17 +139,17 @@ class SpotifyDeezerBridgeExtension :
 
     private suspend fun buildCuratedShelf(): Shelf.Lists.Items? {
         val bleep = runCatching { withTimeoutOrNull(5_000) { fetchBleepWeeklyReleases() } }
-            .onFailure { println("BHUT Bleep live feed: ${it.message}; using V21 fallback") }
+            .onFailure { println("BHUT Bleep live feed: ${it.message}; using V22 fallback") }
             .getOrNull()
             .orEmpty()
             .ifEmpty { fallbackBleepReleases() }
         val boomkat = runCatching { withTimeoutOrNull(5_000) { fetchBoomkatWeeklyReleases() } }
-            .onFailure { println("BHUT Boomkat feed: ${it.message}; using V21 fallback") }
+            .onFailure { println("BHUT Boomkat feed: ${it.message}; using V22 fallback") }
             .getOrNull()
             .orEmpty()
             .ifEmpty { fallbackBoomkatReleases() }
         val bandcamp = runCatching { withTimeoutOrNull(5_000) { fetchBandcampReleases() } }
-            .onFailure { println("BHUT Bandcamp Daily feed: ${it.message}; using V21 fallback") }
+            .onFailure { println("BHUT Bandcamp Daily feed: ${it.message}; using V22 fallback") }
             .getOrNull()
             .orEmpty()
             .ifEmpty { fallbackBandcampReleases() }
@@ -177,7 +180,7 @@ class SpotifyDeezerBridgeExtension :
         if (albums.isEmpty()) return null
         return Shelf.Lists.Items(
             id = "bhut-curated-weekly",
-            title = "CURATED • V21",
+            title = "CURATED • V22",
             list = albums,
             subtitle = "Picks from Bleep, Boomkat and Bandcamp Daily",
         )
@@ -218,7 +221,7 @@ class SpotifyDeezerBridgeExtension :
     private suspend fun fetchBoomkatWeeklyReleases(): List<BleepRelease> = bleepFeedMutex.withLock {
         cachedBoomkatReleases?.let { return@withLock it }
         val json = bleepHttp.newCall(
-            Request.Builder().url(BOOMKAT_FEED_URL).header("User-Agent", "BHUT/21").build()
+            Request.Builder().url(BOOMKAT_FEED_URL).header("User-Agent", "BHUT/22").build()
         ).await().use { response ->
             if (!response.isSuccessful) error("Boomkat feed HTTP ${response.code}")
             response.body.string()
@@ -244,7 +247,7 @@ class SpotifyDeezerBridgeExtension :
     private suspend fun fetchBandcampReleases(): List<BleepRelease> = bleepFeedMutex.withLock {
         cachedBandcampReleases?.let { return@withLock it }
         val json = bleepHttp.newCall(
-            Request.Builder().url(BANDCAMP_FEED_URL).header("User-Agent", "BHUT/21").build()
+            Request.Builder().url(BANDCAMP_FEED_URL).header("User-Agent", "BHUT/22").build()
         ).await().use { response ->
             if (!response.isSuccessful) error("Bandcamp feed HTTP ${response.code}")
             response.body.string()
@@ -339,7 +342,7 @@ class SpotifyDeezerBridgeExtension :
         if (episodes.isEmpty()) return null
         return Shelf.Lists.Items(
             id = "bhut-nts-latest",
-            title = "NTS Latest Archives • V21",
+            title = "NTS Latest Archives • V22",
             list = episodes,
             subtitle = "Newest playable mixes from the NTS archive",
         )
