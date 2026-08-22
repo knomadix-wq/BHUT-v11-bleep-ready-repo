@@ -46,7 +46,7 @@ android {
         // Note: versionCode only increments on git commits. 
         // For local development, consider committing frequently to update the version.
         versionCode = gitCount
-        versionName = "BHUT_V23"
+        versionName = "BHUT_V24"
         // True only when google-services.json is present. Compile-time constant used to guard
         // every Firebase call site so no-JSON builds never load the (compileOnly) Firebase classes.
         buildConfigField("boolean", "HAS_FIREBASE", "$hasGoogleServices")

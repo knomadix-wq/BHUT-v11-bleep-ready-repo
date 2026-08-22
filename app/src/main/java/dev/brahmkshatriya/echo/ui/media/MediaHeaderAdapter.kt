@@ -192,7 +192,7 @@ class MediaHeaderAdapter(
                 if (state.isFollowed == true) R.string.unfollow else R.string.follow
             )
 
-            savedButton.isVisible = state.isSaved != null && !(state.item is Playlist && state.item.isEditable) && !fromPlayer
+            savedButton.isVisible = state.isSaved != null && !(state.item is Playlist && state.item.isEditable)
             savedButton.isChecked = state.isSaved ?: false
             savedButton.contentDescription = root.context.getString(
                 if (state.isSaved == true) R.string.unsave else R.string.save
@@ -212,7 +212,7 @@ class MediaHeaderAdapter(
 
             playButton.isVisible = state.item is Track && !fromPlayer && state.item.isPlayable == Track.Playable.Yes
             radioButton.isVisible = state.showRadio && !fromPlayer
-            shareButton.isVisible = state.showShare && !fromPlayer
+            shareButton.isVisible = state.showShare
             configureButtons()
 
             explicit.isVisible = state.item.isExplicit
