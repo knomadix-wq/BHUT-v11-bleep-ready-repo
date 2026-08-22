@@ -406,6 +406,7 @@ class MediaHeaderAdapter(
                     val genres = item.genres.joinToString(", ")
                     val isrc = item.isrc
                     val albumLabel = item.album?.label
+                        ?.deduplicatedAlbumLabel(item.artists.map { it.name })
                     val discTrack = listOfNotNull(
                         item.albumDiscNumber?.let { getString(R.string.disc_number_n, it) },
                         item.albumOrderNumber?.let { getString(R.string.album_order_n, it) }
@@ -457,7 +458,7 @@ class MediaHeaderAdapter(
 
             val artists = artistNames.map(::comparable).filter(String::isNotBlank).toSet()
             return lineSequence()
-                .flatMap { it.split(Regex("\\s*[|;•]\\s*")).asSequence() }
+                .flatMap { it.split(Regex("\\s*(?:[|;•]|(?=[©℗]))\\s*")).asSequence() }
                 .map(::collapseRepeatedHalf)
                 .filter(String::isNotBlank)
                 .distinctBy(::comparable)

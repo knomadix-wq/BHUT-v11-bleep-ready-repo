@@ -480,8 +480,10 @@ open class SpotifyExtension : ExtensionClient, LoginClient.WebView,
             listOf(Tab("", "All")) + home.homeChips?.toTabs()!!
         return Feed(tabs) { tab ->
             PagedData.Single {
-                val res = if (tab == null || tab.id == "") home
-                else queries.home(tab.id).json.data?.home!!
+                // Fetch on every feed load so pull-to-refresh receives Spotify's current
+                // Release Radar and local/editorial shelves instead of the initial snapshot.
+                val facet = tab?.id?.takeIf(String::isNotEmpty)
+                val res = queries.home(facet).json.data?.home!!
                 res.toShelves(queries, cropCovers)
             }.toFeedData()
         }

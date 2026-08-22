@@ -118,7 +118,7 @@ class ExtensionLoader(
             type = ExtensionType.MUSIC,
             id = "spotify",
             name = "Spotify",
-            version = "built-in-v22",
+            version = "built-in-v23",
             description = "Spotify catalogue, library, and account login for BHUT.",
             author = "Echo",
             icon = "https://static-00.iconduck.com/assets.00/spotify-icon-512x512-6qhm38iz.png".toImageHolder(),
