@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-22T07:09:00.444Z",
+  "updatedAt": "2026-08-22T07:42:02.565Z",
   "source": "https://bleep.com/weekly-roundup?lang=en_GB",
   "releases": [
     {
@@ -24,20 +24,6 @@
       "cover": "https://image-cdn-fa.spotifycdn.com/image/ab67616d00001e025ac0fee4d0e7daf6e2cdc683"
     },
     {
-      "artist": "YHWH Nailgun",
-      "title": "Magazine",
-      "section": "Featured Releases",
-      "spotifyId": "5nT9mBH0yosh5yRuCqpKW3",
-      "cover": "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e0212cfd53ea78f73ebe2d299c7"
-    },
-    {
-      "artist": "Manuel Göttsching",
-      "title": "E2-E4",
-      "section": "Featured Releases",
-      "spotifyId": "64UtnfSDLV1OLvhyqfmO8o",
-      "cover": "https://image-cdn-fa.spotifycdn.com/image/ab67616d00001e02ffc6c70d3312ea98a628ca41"
-    },
-    {
       "artist": "Severed Heads",
       "title": "Cuisine (With Piscatorial)",
       "section": "Featured Releases",
@@ -50,13 +36,6 @@
       "section": "Featured Albums",
       "spotifyId": "3OWKy0zcaRmi0mx4XCLTOF",
       "cover": "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e02f47b2cbda0f690a5cc74baac"
-    },
-    {
-      "artist": "Mark Jenkin",
-      "title": "The Rose Of Nevada (Original Score)",
-      "section": "Featured Albums",
-      "spotifyId": "2qfBLKDF7lFjizITxZVGxB",
-      "cover": "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e0214aa314f81681b92238a46a0"
     }
   ]
 }
