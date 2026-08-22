@@ -1,0 +1,20 @@
+{
+  "updatedAt": "2026-08-22T00:00:00.000Z",
+  "activatedAt": "2026-08-22T00:00:00.000Z",
+  "sources": [
+    { "name": "SHELTER PRESS", "url": "https://shelterpress.bandcamp.com/music" },
+    { "name": "LATENCY", "url": "https://latencyrecordings.bandcamp.com/music" },
+    { "name": "EDITIONS MEGO", "url": "https://editionsmego.bandcamp.com/music" },
+    { "name": "RASTER", "url": "https://raster-raster.bandcamp.com/music" }
+  ],
+  "releases": [
+    {
+      "artist": "Kassel Jaeger",
+      "title": "Sub Re",
+      "source": "SHELTER PRESS",
+      "url": "https://shelterpress.bandcamp.com/album/sub-re",
+      "spotifyId": "1kDaNdOJtTm68CcbNJJPXV",
+      "cover": "https://image-cdn-ak.spotifycdn.com/image/ab67616d00001e0261c3e7bda596f7a0473ed3f5"
+    }
+  ]
+}
